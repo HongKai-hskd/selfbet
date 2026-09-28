@@ -180,11 +180,12 @@ func atoi(s string) int {
 	return n
 }
 
-// UndoLedger removes a same-day task-completion ledger row and restores the
-// task status: once → doing; repeating task's LastDoneKey cleared when no
-// completion remains in the period (multi-round rounds re-count from ledger
-// automatically). Box/penalty/shop rows are not undoable — a box drop from
-// the undone completion stays (user decision, 2026-09-28).
+// UndoLedger removes a same-day task-completion or box-drop ledger row.
+// For task rows the task status is restored: once → doing; repeating task's
+// LastDoneKey cleared when no completion remains in the period (multi-round
+// rounds re-count from ledger automatically). Penalty/shop rows are not
+// undoable (penalty would be re-charged by lazy settle; shop involves
+// cooldown rollback).
 func UndoLedger(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var row model.Ledger
@@ -192,8 +193,8 @@ func UndoLedger(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "记录不存在"})
 			return
 		}
-		if row.Type != "task" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "只有任务完成的记录可以撤回"})
+		if row.Type != "task" && row.Type != "box" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "只有任务完成和宝箱开出的记录可以撤回"})
 			return
 		}
 		now := time.Now()
@@ -203,6 +204,10 @@ func UndoLedger(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		err := db.Transaction(func(tx *gorm.DB) error {
+			if row.Type == "box" {
+				// box rows are standalone: delete and done
+				return tx.Delete(&row).Error
+			}
 			var task model.Task
 			if err := tx.First(&task, row.RefID).Error; err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在或已删除"})

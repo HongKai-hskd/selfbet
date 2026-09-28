@@ -313,18 +313,18 @@ function onPickStart({ selectedValues }) {
   if (customEnd.value) loadDetail()
 }
 
-// ---- 撤回（仅今天 + 任务完成类流水；宝箱/罚分/商城不开放） ----
+// ---- 撤回（仅今天 + 任务完成/宝箱开出类流水；罚分/商城不开放） ----
 
 function canUndo(item) {
-  return item.type === 'task' && dateStr(new Date(item.created_at)) === dateStr(new Date())
+  return (item.type === 'task' || item.type === 'box') && dateStr(new Date(item.created_at)) === dateStr(new Date())
 }
 
 async function undoItem(item) {
+  const msg = item.type === 'task'
+    ? `「${item.note}」\n积分将回退 -${item.amount} 分，任务恢复为进行中`
+    : `「${item.note}」\n积分将回退 -${item.amount} 分`
   try {
-    await showConfirmDialog({
-      title: '撤回记录',
-      message: `「${item.note}」\n积分将回退 -${item.amount} 分，任务恢复为进行中`
-    })
+    await showConfirmDialog({ title: '撤回记录', message: msg })
   } catch {
     return
   }
