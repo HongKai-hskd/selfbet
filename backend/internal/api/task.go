@@ -225,15 +225,18 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 	for i := range tasks {
 		t := &tasks[i]
 		var dueKey, note string
+		var chargeAt time.Time // 罚分追溯记到「失败的那个周期」的最后一刻，而不是扣罚时刻
 		eligible := false
 		switch t.Repeat {
 		case "daily":
 			dueKey = periodKey("daily", yesterdayStart)
+			chargeAt = yesterdayStart.Add(24*time.Hour - time.Second)
 			eligible = t.CreatedAt.Before(todayStart) &&
 				t.LastDoneKey != dueKey && t.LastPenaltyKey != dueKey
 			note = "每日任务未完成罚分：" + t.Title
 		case "weekly":
 			dueKey = periodKey("weekly", lastWeekStart)
+			chargeAt = lastWeekStart.Add(7*24*time.Hour - time.Second)
 			eligible = t.CreatedAt.Before(thisWeekStart) &&
 				t.LastDoneKey != dueKey && t.LastPenaltyKey != dueKey
 			note = "每周任务未完成罚分：" + t.Title
@@ -241,6 +244,7 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 			if t.PenaltySettled || t.Status == "done" || t.DueAt == nil || !t.DueAt.Before(now) {
 				continue
 			}
+			chargeAt = *t.DueAt
 			eligible = true
 			note = "逾期未完成罚分：" + t.Title
 		}
@@ -263,7 +267,7 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 				return gorm.ErrDuplicatedKey // settled by a concurrent request
 			}
 			return tx.Create(&model.Ledger{
-				Type: "penalty", Amount: -t.Penalty, RefID: t.ID, Note: note,
+				Type: "penalty", Amount: -t.Penalty, RefID: t.ID, Note: note, CreatedAt: chargeAt,
 			}).Error
 		})
 	}

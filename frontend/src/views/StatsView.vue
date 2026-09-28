@@ -9,22 +9,22 @@
       </div>
     </div>
 
-    <!-- 四格统计 -->
+    <!-- 四格统计（净额：获得-罚分，负数红色） -->
     <div class="stat-grid">
       <div class="stat-cell">
-        <b>+{{ stats.today.earned }}</b>
+        <b :class="{ neg: netOf(stats.today) < 0 }">{{ signedNet(stats.today) }}</b>
         <span>今天</span>
       </div>
       <div class="stat-cell">
-        <b>+{{ stats.yesterday.earned }}</b>
+        <b :class="{ neg: netOf(stats.yesterday) < 0 }">{{ signedNet(stats.yesterday) }}</b>
         <span>昨天</span>
       </div>
       <div class="stat-cell">
-        <b>+{{ stats.this_week.earned }}</b>
+        <b :class="{ neg: netOf(stats.this_week) < 0 }">{{ signedNet(stats.this_week) }}</b>
         <span>本周</span>
       </div>
       <div class="stat-cell">
-        <b>+{{ stats.this_month.earned }}</b>
+        <b :class="{ neg: netOf(stats.this_month) < 0 }">{{ signedNet(stats.this_month) }}</b>
         <span>本月</span>
       </div>
     </div>
@@ -97,7 +97,7 @@
 
       <div class="range-summary" v-if="detailLoaded">
         <span>{{ rangeText }}</span>
-        <span class="rs-earned">共 +{{ detailEarned }} 分</span>
+        <span class="rs-earned" :class="{ neg: detailSum < 0 }">共 {{ signedNum(detailSum) }} 分</span>
       </div>
 
       <div class="detail-list">
@@ -161,7 +161,7 @@ const detailMode = ref('today')
 const customStart = ref('')
 const customEnd = ref('')
 const detailItems = ref([])
-const detailEarned = ref(0)
+const detailSum = ref(0)
 const detailLoaded = ref(false)
 const pickStart = ref(false)
 const pickEnd = ref(false)
@@ -247,9 +247,10 @@ function cellClass(cell) {
 
 function showTip(cell, e) {
   const d = new Date(cell.date)
-  const text = cell.earned > 0
-    ? `${d.getMonth() + 1}月${d.getDate()}日 获得 ${cell.earned} 分`
-    : `${d.getMonth() + 1}月${d.getDate()}日 没有获得积分`
+  const v = cell.earned
+  const text = v !== 0
+    ? `${d.getMonth() + 1}月${d.getDate()}日 净 ${v > 0 ? '+' : ''}${v} 分`
+    : `${d.getMonth() + 1}月${d.getDate()}日 没有积分变动`
   tip.value = { show: true, x: e.clientX, y: e.clientY - 40, text }
 }
 
@@ -259,8 +260,9 @@ function hideTip() {
 
 function tapCell(cell) {
   const d = new Date(cell.date)
-  if (cell.earned > 0) showToast(`${d.getMonth() + 1}月${d.getDate()}日 获得 ${cell.earned} 分`)
-  else showToast(`${d.getMonth() + 1}月${d.getDate()}日 没有获得积分`)
+  const v = cell.earned
+  if (v !== 0) showToast(`${d.getMonth() + 1}月${d.getDate()}日 净 ${v > 0 ? '+' : ''}${v} 分`)
+  else showToast(`${d.getMonth() + 1}月${d.getDate()}日 没有积分变动`)
 }
 
 // ---- 明细（按范围） ----
@@ -302,8 +304,20 @@ async function loadDetail() {
   const params = { start_date: dateStr(start), end_date: dateStr(end), limit: 500 }
   const res = await api.get('/ledger', { params })
   detailItems.value = res.items || []
-  detailEarned.value = res.range_earned || 0
+  detailSum.value = res.range_sum || 0
   detailLoaded.value = true
+}
+
+// 四格卡/汇总净额：获得 - 罚分等负数行
+function netOf(p) {
+  return (p.earned || 0) - (p.spent || 0)
+}
+function signedNet(p) {
+  const v = netOf(p)
+  return v >= 0 ? `+${v}` : `${v}`
+}
+function signedNum(v) {
+  return v >= 0 ? `+${v}` : `${v}`
 }
 
 function onPickStart({ selectedValues }) {
@@ -471,6 +485,8 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 .rs-earned { color: #1989fa; font-weight: 600; }
+.rs-earned.neg { color: #ee0a24; }
+.stat-cell b.neg { color: #ee0a24; }
 .detail-list { max-height: 420px; overflow-y: auto; }
 .detail-item {
   display: flex;

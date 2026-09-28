@@ -153,7 +153,7 @@ func ListLedger(db *gorm.DB) gin.HandlerFunc {
 			}
 		}
 		items := []model.Ledger{}
-		rangeEarned := 0
+		rangeSum := 0 // 范围内净额（含罚分等负数行）
 		for _, r := range all {
 			if hasRange {
 				if startStr != "" && r.CreatedAt.Before(startTime) {
@@ -163,9 +163,7 @@ func ListLedger(db *gorm.DB) gin.HandlerFunc {
 					continue
 				}
 			}
-			if r.Amount > 0 {
-				rangeEarned += r.Amount
-			}
+			rangeSum += r.Amount
 			items = append(items, r)
 		}
 		if len(items) > limit {
@@ -173,7 +171,7 @@ func ListLedger(db *gorm.DB) gin.HandlerFunc {
 		}
 		var row model.Ledger
 		db.Model(&model.Ledger{}).Select("COALESCE(SUM(amount),0) AS amount").Scan(&row)
-		c.JSON(http.StatusOK, gin.H{"items": items, "balance": int(row.Amount), "range_earned": rangeEarned})
+		c.JSON(http.StatusOK, gin.H{"items": items, "balance": int(row.Amount), "range_sum": rangeSum})
 	}
 }
 

@@ -60,9 +60,7 @@ func GetStats(db *gorm.DB) gin.HandlerFunc {
 		)
 		for _, r := range rows {
 			k := dayKey(r.CreatedAt)
-			if r.Amount > 0 {
-				heat[k] += r.Amount
-			}
+			heat[k] += r.Amount // 净值口径：含罚分等负数行，与四格卡/明细一致
 			switch {
 			case k == todayKey:
 				applyPeriod(&today, r.Amount)
