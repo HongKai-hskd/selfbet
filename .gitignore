@@ -8,8 +8,9 @@ backend/server.exe
 backend/server.exe~
 *.exe
 
-# ---- 数据与密钥（生产库 + 密码，绝不入库）----
-backend/data/
+# ---- 数据与密钥（生产库 + 密码，绝不入库；仅放行备份脚本）----
+backend/data/*
+!backend/data/backup.bat
 
 # ---- AI 会话数据（项目记忆，非代码）----
 .workbuddy/
