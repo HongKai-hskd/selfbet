@@ -111,13 +111,13 @@
     <div ref="tagListEl" class="tag-list">
       <div v-for="tg in tags" :key="tg.id" class="box-card">
         <div class="drag-handle">☰</div>
-        <div class="box-emoji">🏷️</div>
+        <div class="box-emoji"><span class="tag-dot" :style="{ background: tg.color || '#1989fa' }"></span></div>
         <div class="box-main">
           <div class="box-name">{{ tg.name }}</div>
           <div class="box-range">{{ tg.task_count }} 任务</div>
         </div>
         <div class="box-actions">
-          <van-button size="small" plain round @click="openTagEdit(tg)">改名</van-button>
+          <van-button size="small" plain round @click="openTagEdit(tg)">编辑</van-button>
           <van-icon name="delete-o" class="del-icon" @click="removeTag(tg)" />
         </div>
       </div>
@@ -127,10 +127,19 @@
     <div class="tip">分组用于任务归类与筛选；改名后所有任务自动跟随，删除后组内任务变为未分组</div>
 
     <van-popup v-model:show="tagEditShow" round position="bottom" style="padding: 20px 16px 28px">
-      <div class="form-title">重命名分组</div>
+      <div class="form-title">编辑分组</div>
       <van-cell-group inset>
         <van-field v-model="tagEditName" label="名称" placeholder="新名称" :rules="[{ required: true, message: '必填' }]" />
       </van-cell-group>
+      <div class="color-label">颜色</div>
+      <div class="color-grid">
+        <span
+          v-for="c in TAG_COLORS" :key="c"
+          class="color-dot" :class="{ active: tagEditColor === c }"
+          :style="{ background: c }"
+          @click="tagEditColor = c"
+        />
+      </div>
       <div style="margin: 16px 16px 0">
         <van-button round block type="primary" @click="saveTagEdit">保存</van-button>
       </div>
@@ -151,6 +160,8 @@ const newTagName = ref('')
 const tagEditShow = ref(false)
 const tagEdit = ref(null)
 const tagEditName = ref('')
+const tagEditColor = ref('#1989fa')
+const TAG_COLORS = ['#1989fa', '#07c160', '#00b8d4', '#7232dd', '#ff6699', '#ff976a', '#ee0a24', '#969797']
 const tagListEl = ref(null)
 let tagSortable = null
 const boxFormShow = ref(false)
@@ -253,15 +264,16 @@ async function addTag() {
 function openTagEdit(tg) {
   tagEdit.value = tg
   tagEditName.value = tg.name
+  tagEditColor.value = tg.color || '#1989fa'
   tagEditShow.value = true
 }
 
 async function saveTagEdit() {
   if (!tagEditName.value.trim()) return showToast('名称不能为空')
   try {
-    await api.put(`/tags/${tagEdit.value.id}`, { name: tagEditName.value.trim() })
+    await api.put(`/tags/${tagEdit.value.id}`, { name: tagEditName.value.trim(), color: tagEditColor.value })
     tagEditShow.value = false
-    showToast('已改名，任务自动跟随')
+    showToast('已保存，任务自动跟随')
     load()
   } catch (e) {
     showToast(e)
@@ -348,6 +360,11 @@ async function removeBox(b) {
   gap: 10px;
 }
 .box-emoji { font-size: 26px; }
+.tag-dot { display: block; width: 16px; height: 16px; border-radius: 5px; }
+.color-label { font-size: 14px; color: #646566; margin: 14px 20px 0; }
+.color-grid { display: flex; flex-wrap: wrap; gap: 14px; padding: 12px 22px 0; }
+.color-dot { width: 30px; height: 30px; border-radius: 50%; cursor: pointer; box-sizing: border-box; }
+.color-dot.active { outline: 2px solid #323233; outline-offset: 2px; }
 .box-main { flex: 1; min-width: 0; }
 .box-name { font-size: 15px; font-weight: 500; color: #323233; }
 .box-range { font-size: 12px; color: #969799; margin-top: 2px; }

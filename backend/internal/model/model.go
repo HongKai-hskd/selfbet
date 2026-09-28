@@ -12,7 +12,8 @@ import (
 type Tag struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	Name      string    `gorm:"uniqueIndex;not null" json:"name"`
-	SortOrder int       `gorm:"index" json:"sort_order"` // manual display order (drag & drop)
+	Color     string    `gorm:"default:'#1989fa'" json:"color"` // hex color for chips (e.g. #07c160)
+	SortOrder int       `gorm:"index" json:"sort_order"`        // manual display order (drag & drop)
 	CreatedAt time.Time `json:"created_at"`
 }
 

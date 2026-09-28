@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -15,13 +16,14 @@ func ListTags(db *gorm.DB) gin.HandlerFunc {
 	type tagWithCount struct {
 		ID        uint   `json:"id"`
 		Name      string `json:"name"`
+		Color     string `json:"color"`
 		TaskCount int64  `json:"task_count"`
 		ShopCount int64  `json:"shop_count"`
 	}
 	return func(c *gin.Context) {
 		list := []tagWithCount{}
 		if err := db.Table("tags").
-			Select("tags.id, tags.name, "+
+			Select("tags.id, tags.name, tags.color, "+
 				"(SELECT COUNT(*) FROM tasks WHERE tasks.tag_id = tags.id) AS task_count, "+
 				"(SELECT COUNT(*) FROM shop_items WHERE shop_items.tag_id = tags.id) AS shop_count").
 			Group("tags.id").
@@ -35,7 +37,29 @@ func ListTags(db *gorm.DB) gin.HandlerFunc {
 }
 
 type tagBody struct {
-	Name string `json:"name"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// normalizeColor lowercases and validates a hex color; empty falls back to
+// the default blue.
+func normalizeColor(s string) (string, bool) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return "#1989fa", true
+	}
+	if len(s) != 4 && len(s) != 7 {
+		return "", false
+	}
+	if s[0] != '#' {
+		return "", false
+	}
+	for _, r := range s[1:] {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return "", false
+		}
+	}
+	return s, true
 }
 
 func CreateTag(db *gorm.DB) gin.HandlerFunc {
@@ -55,7 +79,12 @@ func CreateTag(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "同名分组已存在"})
 			return
 		}
-		tag := model.Tag{Name: body.Name}
+		color, ok := normalizeColor(body.Color)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "颜色格式无效（#RRGGBB）"})
+			return
+		}
+		tag := model.Tag{Name: body.Name, Color: color}
 		if err := db.Create(&tag).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -82,8 +111,17 @@ func UpdateTag(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "同名分组已存在"})
 			return
 		}
-		// tasks reference the tag by id, so renaming propagates automatically
+		// tasks reference the tag by id, so renaming propagates automatically;
+		// empty color keeps the current one
 		tag.Name = body.Name
+		if body.Color != "" {
+			color, ok := normalizeColor(body.Color)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "颜色格式无效（#RRGGBB）"})
+				return
+			}
+			tag.Color = color
+		}
 		if err := db.Save(&tag).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

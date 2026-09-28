@@ -12,7 +12,10 @@
         v-for="g in groupOptions" :key="g.value"
         class="chip" :class="{ active: filterGroup === g.value }"
         @click="filterGroup = g.value"
-      >{{ g.text }}</span>
+      ><i
+          v-if="g.value !== '__all__' && g.value !== '__none__'"
+          class="chip-dot" :style="{ background: tagColor(g.value) }"
+        />{{ g.text }}</span>
       <span class="chip sort-chip" :class="{ active: sortByDue }" @click="sortByDue = !sortByDue">
         ⇅ 截止期优先
       </span>
@@ -28,7 +31,7 @@
           </div>
           <div class="task-meta">
             <span class="pts">+{{ t.points }} 分</span>
-            <span v-if="t.tag_name" class="meta-item group-tag">{{ t.tag_name }}</span>
+            <span v-if="t.tag_name" class="meta-item group-tag" :style="tagChipStyle(t.tag_name)">{{ t.tag_name }}</span>
             <span v-if="t.box_id" class="meta-item box-tag">🎁 {{ boxName(t.box_id) }} · {{ t.box_drop_rate }}%</span>
             <span v-if="t.penalty" class="meta-item penalty-tag">未完成 -{{ t.penalty }}</span>
             <span v-if="t.multi_round && t.rounds_today" class="meta-item round-tag">
@@ -226,6 +229,16 @@ const groupOptions = computed(() => {
   tags.value.forEach((t) => opts.push({ text: t.name, value: t.name }))
   return opts
 })
+
+// 分组颜色：卡片小标签 = 分组色文字 + 10% 同色底
+function tagColor(name) {
+  const tg = tags.value.find((x) => x.name === name)
+  return (tg && tg.color) || '#1989fa'
+}
+function tagChipStyle(name) {
+  const c = tagColor(name)
+  return { color: c, background: c + '1a' }
+}
 
 const pickTag = ref(false)
 const tagColumns = computed(() => [
@@ -442,6 +455,7 @@ function fmtTime(s) {
   border-color: #1989fa;
 }
 .sort-chip { margin-left: auto; }
+.chip-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
 .task-list { margin-top: 10px; }
 .drag-handle {
   color: #c8c9cc;
@@ -477,8 +491,6 @@ function fmtTime(s) {
 .task-meta { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #969799; }
 .pts { color: #1989fa; font-weight: 600; }
 .group-tag {
-  color: #1989fa;
-  background: #e8f3ff;
   border-radius: 4px;
   padding: 0 5px;
 }
