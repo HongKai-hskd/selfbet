@@ -12,7 +12,10 @@ const routes = [
       { path: 'shop', component: () => import('./views/ShopView.vue') },
       { path: 'mine', component: () => import('./views/MineView.vue') }
     ]
-  }
+  },
+  // 子页面（无底部 Tab，自带返回导航）
+  { path: '/backpack', component: () => import('./views/BackpackView.vue') },
+  { path: '/cash', component: () => import('./views/CashView.vue') }
 ]
 
 const router = createRouter({

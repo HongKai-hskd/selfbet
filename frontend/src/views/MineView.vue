@@ -10,6 +10,14 @@
       </div>
     </div>
 
+    <div class="backpack-entry" @click="$router.push('/backpack')">
+      <div class="be-icon">🎒</div>
+      <div class="be-name">背包</div>
+      <div class="be-sub" v-if="me.backpack_count">{{ me.backpack_count }} 个待开</div>
+      <div class="be-sub" v-else>暂无待开物品</div>
+      <van-icon name="arrow" class="be-arrow" />
+    </div>
+
     <div class="section-title">宝箱管理</div>
     <div class="box-list">
       <div v-for="b in boxes" :key="b.id" class="box-card">
@@ -28,7 +36,7 @@
     <van-button block round plain type="primary" icon="plus" class="add-box-btn" @click="openBoxForm()">
       新建宝箱类型
     </van-button>
-    <div class="tip">在任务里关联宝箱并设置掉率，完成任务时按概率开出随机积分</div>
+    <div class="tip">在任务里关联宝箱并设置掉率；掉落的宝箱进背包，开启时才入账。三项道具概率之和 ≤ 100，剩余概率开积分</div>
 
     <van-popup v-model:show="boxFormShow" round position="bottom" style="padding: 20px 16px 28px">
       <div class="form-title">{{ boxForm.id ? '编辑宝箱' : '新建宝箱' }}</div>
@@ -37,6 +45,9 @@
           <van-field v-model="boxForm.name" label="名称" placeholder="小奖励 / 大奖池" :rules="[{ required: true, message: '请填名称' }]" />
           <van-field v-model="boxForm.min_points" type="digit" label="最少积分" placeholder="5" :rules="[{ required: true, message: '必填' }]" />
           <van-field v-model="boxForm.max_points" type="digit" label="最多积分" placeholder="50" :rules="[{ required: true, message: '必填' }]" />
+          <van-field v-model="boxForm.item_rate_points" type="digit" label="利息卡(积分)%" placeholder="0" />
+          <van-field v-model="boxForm.item_rate_cash" type="digit" label="利息卡(余额)%" placeholder="0" />
+          <van-field v-model="boxForm.item_rate_reset" type="digit" label="重置卡%" placeholder="0" />
         </van-cell-group>
         <div style="margin: 16px 16px 0">
           <van-button round block type="primary" native-type="submit">保存</van-button>
@@ -64,6 +75,7 @@
         </div>
       </div>
       <div class="cash-empty" v-else>兑换和消费记录会显示在这里</div>
+      <div class="cash-more" v-if="cashFlows.length" @click="$router.push('/cash')">查看全部 ›</div>
     </div>
 
     <!-- 积分兑换余额 -->
@@ -179,7 +191,7 @@ const TAG_COLORS = ['#1989fa', '#07c160', '#00b8d4', '#7232dd', '#ff6699', '#ff9
 const tagListEl = ref(null)
 let tagSortable = null
 const boxFormShow = ref(false)
-const boxForm = ref({ id: null, name: '', min_points: '', max_points: '' })
+const boxForm = ref({ id: null, name: '', min_points: '', max_points: '', item_rate_points: '', item_rate_cash: '', item_rate_reset: '' })
 const cashBalance = ref(0)
 const cashFlows = ref([])
 const exchangeShow = ref(false)
@@ -316,14 +328,27 @@ async function removeTag(tg) {
 
 function openBoxForm(b) {
   boxForm.value = b
-    ? { id: b.id, name: b.name, min_points: String(b.min_points), max_points: String(b.max_points) }
-    : { id: null, name: '', min_points: '', max_points: '' }
+    ? {
+        id: b.id, name: b.name,
+        min_points: String(b.min_points), max_points: String(b.max_points),
+        item_rate_points: String(b.item_rate_points || 0),
+        item_rate_cash: String(b.item_rate_cash || 0),
+        item_rate_reset: String(b.item_rate_reset || 0)
+      }
+    : { id: null, name: '', min_points: '', max_points: '', item_rate_points: '', item_rate_cash: '', item_rate_reset: '' }
   boxFormShow.value = true
 }
 
 async function saveBox() {
   const f = boxForm.value
-  const body = { name: f.name, min_points: parseInt(f.min_points) || 0, max_points: parseInt(f.max_points) || 0 }
+  const body = {
+    name: f.name,
+    min_points: parseInt(f.min_points) || 0,
+    max_points: parseInt(f.max_points) || 0,
+    item_rate_points: parseInt(f.item_rate_points) || 0,
+    item_rate_cash: parseInt(f.item_rate_cash) || 0,
+    item_rate_reset: parseInt(f.item_rate_reset) || 0
+  }
   try {
     if (f.id) await api.put(`/boxes/${f.id}`, body)
     else await api.post('/boxes', body)
@@ -411,6 +436,21 @@ async function removeBox(b) {
 .cash-flow-item .plus { color: #07c160; }
 .cash-flow-item .minus { color: #ee0a24; }
 .cash-empty { text-align: center; font-size: 12px; color: #c8c9cc; margin-top: 12px; }
+.cash-more { text-align: center; font-size: 12px; color: #1989fa; padding-top: 8px; cursor: pointer; }
+.backpack-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(135deg, #e8f3ff, #f0f7ff);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  cursor: pointer;
+}
+.be-icon { font-size: 22px; }
+.be-name { font-size: 15px; font-weight: 600; color: #323233; }
+.be-sub { font-size: 12px; color: #1989fa; margin-left: 2px; }
+.be-arrow { margin-left: auto; color: #c8c9cc; }
 .form-title { text-align: center; font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #323233; }
 .ex-summary {
   margin: 14px 16px 0;

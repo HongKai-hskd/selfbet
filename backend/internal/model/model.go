@@ -47,10 +47,25 @@ type Task struct {
 // Box is a user-defined box type. Opening it grants a random amount of
 // points between MinPoints and MaxPoints (inclusive).
 type Box struct {
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	Name           string    `gorm:"not null" json:"name"`
+	MinPoints      int       `json:"min_points"`
+	MaxPoints      int       `json:"max_points"`
+	ItemRatePoints int       `json:"item_rate_points"` // % 积分利息卡
+	ItemRateCash   int       `json:"item_rate_cash"`   // % 余额利息卡
+	ItemRateReset  int       `json:"item_rate_reset"`  // % 冷却重置卡（剩余概率=开积分）
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// BackpackItem is one unopened drop sitting in the backpack (box or item).
+// Opening/using it deletes the row and writes the corresponding ledger /
+// cash rows. Source links a box back to the task-completion ledger row that
+// dropped it, so undoing that completion recalls the unopened box.
+type BackpackItem struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	Name      string    `gorm:"not null" json:"name"`
-	MinPoints int       `json:"min_points"`
-	MaxPoints int       `json:"max_points"`
+	Kind      string    `gorm:"index" json:"kind"` // box | item
+	TypeID    uint      `gorm:"index" json:"type_id"`
+	Source    uint      `gorm:"index" json:"source"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -100,7 +115,7 @@ func Open(dataDir string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&Task{}, &Box{}, &ShopItem{}, &Ledger{}, &Tag{}, &CashFlow{}); err != nil {
+	if err := db.AutoMigrate(&Task{}, &Box{}, &ShopItem{}, &Ledger{}, &Tag{}, &CashFlow{}, &BackpackItem{}); err != nil {
 		return nil, err
 	}
 	// one-time lazy migration: legacy free-text group_name → Tag rows

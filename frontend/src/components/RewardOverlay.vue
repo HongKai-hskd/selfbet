@@ -6,18 +6,16 @@
         <div class="reward-label">{{ data.taskTitle }}</div>
         <div class="reward-amount bounce">+{{ data.taskPoints }}</div>
         <div class="reward-unit">积分到账</div>
-        <!-- 宝箱结果直接跟在任务积分下方，手快收下也不会错过 -->
+        <!-- 掉落进背包的宝箱/道具直接跟在任务积分下方，手快收下也不会错过 -->
         <div class="box-inline" v-if="data.boxName">
           <span class="box-inline-icon">🎁</span>
-          {{ data.boxName }}
-          <b class="box-inline-pts">+{{ data.boxPoints }}</b>
+          {{ data.boxName }} ×{{ data.boxCount }} 已放入背包
         </div>
       </template>
       <template v-else-if="phase === 'box'">
         <div class="box-icon pop">🎁</div>
-        <div class="reward-label">{{ data.boxName }}</div>
-        <div class="reward-amount bounce gold">+{{ data.boxPoints }}</div>
-        <div class="reward-unit">宝箱开出！</div>
+        <div class="reward-label">{{ data.boxName }} ×{{ data.boxCount }}</div>
+        <div class="reward-unit">已放入背包，去「我的 → 背包」开启</div>
       </template>
       <template v-else>
         <div class="reward-total">共 +{{ data.total }} 积分</div>
@@ -46,7 +44,7 @@ watch(
       taskTitle: r.task && r.task.title,
       taskPoints: r.task && r.task.points,
       boxName: r.box && r.box.name,
-      boxPoints: r.box && r.box.points,
+      boxCount: (r.box && r.box.count) || 1,
       total: r.earned
     }
     visible.value = true
@@ -124,10 +122,6 @@ function close() {
 }
 .box-inline-icon {
   margin-right: 4px;
-}
-.box-inline-pts {
-  color: #ff9900;
-  margin-left: 4px;
 }
 .reward-btn {
   margin-top: 24px;

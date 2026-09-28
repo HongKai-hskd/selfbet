@@ -356,8 +356,9 @@ func StartTask(db *gorm.DB) gin.HandlerFunc {
 // for the linked box drop. Everything happens in one transaction.
 func CompleteTask(db *gorm.DB) gin.HandlerFunc {
 	type boxResult struct {
-		Name   string `json:"name"`
-		Points int    `json:"points"`
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+		Item  bool   `json:"item"` // true = 开出的是道具而非待开宝箱
 	}
 	type result struct {
 		Task    model.Task  `json:"task"`
@@ -415,23 +416,34 @@ func CompleteTask(db *gorm.DB) gin.HandlerFunc {
 				}
 				note += "（第 " + itoa(n) + " 轮）"
 			}
-			if err := tx.Create(&model.Ledger{Type: "task", Amount: earned, RefID: task.ID, Note: note}).Error; err != nil {
+			lrow := model.Ledger{Type: "task", Amount: earned, RefID: task.ID, Note: note}
+			if err := tx.Create(&lrow).Error; err != nil {
 				return err
 			}
-			// box drop roll
+			// box drop roll: the box goes to the backpack unopened — what it
+			// contains is decided when the user opens it. The three item
+			// rates roll now; a hit puts an item in the backpack instead of
+			// a box. The remainder is the chance of a plain points box.
 			if task.BoxID != nil && task.BoxDropRate > 0 && rand.Intn(100) < task.BoxDropRate {
 				var box model.Box
 				if err := tx.First(&box, *task.BoxID).Error; err == nil {
-					span := box.MaxPoints - box.MinPoints
-					if span < 0 {
-						span = 0
+					roll := rand.Intn(100)
+					itemType := 0
+					if roll < box.ItemRatePoints {
+						itemType = 1
+					} else if roll < box.ItemRatePoints+box.ItemRateCash {
+						itemType = 2
+					} else if roll < box.ItemRatePoints+box.ItemRateCash+box.ItemRateReset {
+						itemType = 3
 					}
-					pts := box.MinPoints + rand.Intn(span+1)
-					if err := tx.Create(&model.Ledger{Type: "box", Amount: pts, RefID: box.ID, Note: "宝箱「" + box.Name + "」开出"}).Error; err != nil {
+					kind, typeID, name := "box", box.ID, box.Name
+					if itemType > 0 {
+						kind, typeID, name = "item", uint(itemType), itemName(uint(itemType))
+					}
+					if err := tx.Create(&model.BackpackItem{Kind: kind, TypeID: typeID, Source: lrow.ID}).Error; err != nil {
 						return err
 					}
-					out.Box = &boxResult{Name: box.Name, Points: pts}
-					earned += pts
+					out.Box = &boxResult{Name: name, Count: 1, Item: itemType > 0}
 				}
 			}
 			out.Task, out.Earned = task, earned

@@ -27,6 +27,10 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		authed.GET("/ledger", ListLedger(db))
 		authed.POST("/ledger/:id/undo", UndoLedger(db))
 
+		authed.GET("/backpack", ListBackpack(db))
+		authed.POST("/backpack/open", OpenBoxes(db))
+		authed.POST("/backpack/use", UseItem(db))
+
 		authed.GET("/tasks", ListTasks(db))
 		authed.POST("/tasks", CreateTask(db))
 		authed.PUT("/tasks/:id", UpdateTask(db))
@@ -81,10 +85,11 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 // Me returns the point summary for the header/dashboard.
 func Me(db *gorm.DB) gin.HandlerFunc {
 	type summary struct {
-		Balance     int   `json:"balance"`
-		TotalEarned int   `json:"total_earned"`
-		TotalSpent  int   `json:"total_spent"`
-		TasksDone   int64 `json:"tasks_done"`
+		Balance       int   `json:"balance"`
+		TotalEarned   int   `json:"total_earned"`
+		TotalSpent    int   `json:"total_spent"`
+		TasksDone     int64 `json:"tasks_done"`
+		BackpackCount int64 `json:"backpack_count"` // 未开宝箱数（背包入口角标）
 	}
 	return func(c *gin.Context) {
 		var sums struct {
@@ -102,11 +107,14 @@ func Me(db *gorm.DB) gin.HandlerFunc {
 		// last_done_key (DB status stays pending), so counting task rows is
 		// the truthful "how many times did I complete something"
 		db.Model(&model.Ledger{}).Where("type = ?", "task").Count(&done)
+		var bcount int64
+		db.Model(&model.BackpackItem{}).Where("kind = ?", "box").Count(&bcount)
 		c.JSON(http.StatusOK, summary{
-			Balance:     sums.Amount,
-			TotalEarned: sums.TotalEarned,
-			TotalSpent:  sums.Spent,
-			TasksDone:   done,
+			Balance:       sums.Amount,
+			TotalEarned:   sums.TotalEarned,
+			TotalSpent:    sums.Spent,
+			TasksDone:     done,
+			BackpackCount: bcount,
 		})
 	}
 }
@@ -215,6 +223,12 @@ func UndoLedger(db *gorm.DB) gin.HandlerFunc {
 			}
 			if err := tx.Delete(&row).Error; err != nil {
 				return err
+			}
+			// 撤回任务完成 = 整次作废：该次掉落进背包的未开宝箱/道具一并收回
+			if row.Type == "task" {
+				if err := tx.Where("source = ?", row.ID).Delete(&model.BackpackItem{}).Error; err != nil {
+					return err
+				}
 			}
 			// remaining completions of this task in the current period
 			// (in-memory date filtering, same convention as the stats page)

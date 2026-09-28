@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -19,17 +20,60 @@ func cashBalance(db *gorm.DB) int {
 	return row.Sum
 }
 
-// GetCash returns wallet balance and recent flows.
+// GetCash returns wallet balance and flows. Optional filters (mirroring
+// the stats detail page): start_date/end_date (YYYY-MM-DD, local, end
+// exclusive) and type = in|out. earned_cents / spent_cents sum within the
+// selected range.
 func GetCash(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		flows := []model.CashFlow{}
-		if err := db.Order("created_at DESC, id DESC").Limit(100).Find(&flows).Error; err != nil {
+		if err := db.Order("created_at DESC, id DESC").Limit(500).Find(&flows).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		startStr, endStr := c.Query("start_date"), c.Query("end_date")
+		var startTime, endTime time.Time
+		hasRange := false
+		if startStr != "" {
+			if t, err := time.ParseInLocation("2006-01-02", startStr, time.Local); err == nil {
+				startTime, hasRange = t, true
+			}
+		}
+		if endStr != "" {
+			if t, err := time.ParseInLocation("2006-01-02", endStr, time.Local); err == nil {
+				endTime, hasRange = t.AddDate(0, 0, 1), true
+			}
+		}
+		typeSel := c.Query("type") // in | out | ""
+		items := []model.CashFlow{}
+		earned, spent := 0, 0
+		for _, f := range flows {
+			if hasRange {
+				if startStr != "" && f.CreatedAt.Before(startTime) {
+					continue
+				}
+				if endStr != "" && !f.CreatedAt.Before(endTime) {
+					continue
+				}
+			}
+			if typeSel == "in" && f.AmountCents < 0 {
+				continue
+			}
+			if typeSel == "out" && f.AmountCents > 0 {
+				continue
+			}
+			if f.AmountCents > 0 {
+				earned += f.AmountCents
+			} else {
+				spent += -f.AmountCents
+			}
+			items = append(items, f)
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"balance_cents": cashBalance(db),
-			"items":         flows,
+			"items":         items,
+			"earned_cents":  earned,
+			"spent_cents":   spent,
 		})
 	}
 }
