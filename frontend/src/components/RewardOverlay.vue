@@ -6,6 +6,12 @@
         <div class="reward-label">{{ data.taskTitle }}</div>
         <div class="reward-amount bounce">+{{ data.taskPoints }}</div>
         <div class="reward-unit">积分到账</div>
+        <!-- 宝箱结果直接跟在任务积分下方，手快收下也不会错过 -->
+        <div class="box-inline" v-if="data.boxName">
+          <span class="box-inline-icon">🎁</span>
+          {{ data.boxName }}
+          <b class="box-inline-pts">+{{ data.boxPoints }}</b>
+        </div>
       </template>
       <template v-else-if="phase === 'box'">
         <div class="box-icon pop">🎁</div>
@@ -106,6 +112,22 @@ function close() {
 .box-icon {
   font-size: 64px;
   line-height: 1.2;
+}
+.box-inline {
+  margin-top: 14px;
+  padding: 8px 14px;
+  background: #fffbeb;
+  border: 1px solid #ffdf8a;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #646566;
+}
+.box-inline-icon {
+  margin-right: 4px;
+}
+.box-inline-pts {
+  color: #ff9900;
+  margin-left: 4px;
 }
 .reward-btn {
   margin-top: 24px;
