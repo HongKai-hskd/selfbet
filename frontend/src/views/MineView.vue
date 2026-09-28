@@ -74,13 +74,18 @@
           <template #button><span class="pts-hint">分</span></template>
         </van-field>
       </van-cell-group>
-      <div class="rd-total">
-        <span>可得</span>
-        <b class="rd-total-num">¥{{ exchangeYuan }}</b>
+      <div class="ex-summary">
+        <div class="ex-row">
+          <span class="ex-label">可得余额</span>
+          <span class="ex-val money">¥{{ exchangeYuan }}</span>
+        </div>
+        <div class="ex-row">
+          <span class="ex-label">兑换后积分剩余</span>
+          <span class="ex-val" :class="{ over: remaining < 0 }">{{ remaining }} 分</span>
+        </div>
       </div>
-      <div class="rd-balance">兑换后积分剩余 {{ me.balance - (parseInt(exchangePoints) || 0) }} 分</div>
       <div style="margin: 16px 16px 0">
-        <van-button round block type="primary" :disabled="!exchangePoints || (parseInt(exchangePoints) || 0) % 10 !== 0" :loading="exchanging" @click="doExchange">
+        <van-button round block type="primary" :disabled="!exchangePoints || (parseInt(exchangePoints) || 0) % 10 !== 0 || remaining < 0" :loading="exchanging" @click="doExchange">
           确认兑换
         </van-button>
       </div>
@@ -177,6 +182,7 @@ const spendNote = ref('')
 const spending = ref(false)
 
 const exchangeYuan = computed(() => ((parseInt(exchangePoints.value) || 0) / 10).toFixed(2))
+const remaining = computed(() => me.value.balance - (parseInt(exchangePoints.value) || 0))
 
 async function load() {
   const [m, b, t, c] = await Promise.all([api.get('/me'), api.get('/boxes'), api.get('/tags'), api.get('/cash')])
@@ -396,4 +402,21 @@ async function removeBox(b) {
 .cash-flow-item .minus { color: #ee0a24; }
 .cash-empty { text-align: center; font-size: 12px; color: #c8c9cc; margin-top: 12px; }
 .form-title { text-align: center; font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #323233; }
+.ex-summary {
+  margin: 14px 16px 0;
+  padding: 10px 16px;
+  background: #f7f8fa;
+  border-radius: 10px;
+}
+.ex-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 14px;
+  color: #646566;
+}
+.ex-val { font-weight: 600; color: #323233; }
+.ex-val.money { color: #07c160; font-size: 17px; }
+.ex-val.over { color: #ee0a24; }
 </style>
