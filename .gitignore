@@ -1,0 +1,20 @@
+# ---- 依赖 ----
+frontend/node_modules/
+
+# ---- 构建产物（build.bat 可重新生成）----
+frontend/dist/
+backend/web/dist/
+backend/server.exe
+backend/server.exe~
+*.exe
+
+# ---- 数据与密钥（生产库 + 密码，绝不入库）----
+backend/data/
+
+# ---- AI 会话数据（项目记忆，非代码）----
+.workbuddy/
+
+# ---- 系统杂项 ----
+Thumbs.db
+Desktop.ini
+.DS_Store
