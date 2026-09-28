@@ -100,9 +100,18 @@
         </van-field>
         <van-field v-model="spendNote" label="买了什么" placeholder="零食 / 玩具 / …" required />
       </van-cell-group>
-      <div class="rd-balance" style="margin-top: 10px">当前余额 ¥{{ (cashBalance / 100).toFixed(2) }}</div>
+      <div class="ex-summary">
+        <div class="ex-row">
+          <span class="ex-label">当前余额</span>
+          <span class="ex-val money">¥{{ (cashBalance / 100).toFixed(2) }}</span>
+        </div>
+        <div class="ex-row">
+          <span class="ex-label">消费后余额</span>
+          <span class="ex-val" :class="{ over: spendAfter < 0 }">¥{{ spendAfter.toFixed(2) }}</span>
+        </div>
+      </div>
       <div style="margin: 16px 16px 0">
-        <van-button round block type="primary" :disabled="!(parseFloat(spendYuanStr) > 0) || !spendNote.trim()" :loading="spending" @click="doSpend">
+        <van-button round block type="primary" :disabled="!(parseFloat(spendYuanStr) > 0) || !spendNote.trim() || spendAfter < 0" :loading="spending" @click="doSpend">
           记录消费
         </van-button>
       </div>
@@ -183,6 +192,7 @@ const spending = ref(false)
 
 const exchangeYuan = computed(() => ((parseInt(exchangePoints.value) || 0) / 10).toFixed(2))
 const remaining = computed(() => me.value.balance - (parseInt(exchangePoints.value) || 0))
+const spendAfter = computed(() => cashBalance.value / 100 - (parseFloat(spendYuanStr.value) || 0))
 
 async function load() {
   const [m, b, t, c] = await Promise.all([api.get('/me'), api.get('/boxes'), api.get('/tags'), api.get('/cash')])
