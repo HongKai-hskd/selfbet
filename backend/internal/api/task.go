@@ -28,7 +28,9 @@ func periodKey(repeat string, now time.Time) string {
 
 // effectiveStatus computes the display status. Repeating tasks are
 // automatically "in progress" each period (no manual start needed) and
-// reset lazily at period boundaries.
+// reset lazily at period boundaries. Once tasks with a deadline auto-start
+// on the deadline day (and stay doing if overdue) — same no-manual-start
+// spirit as repeating tasks.
 func effectiveStatus(t *model.Task, now time.Time) string {
 	if t.Repeat == "daily" || t.Repeat == "weekly" {
 		// multi-round tasks stay claimable all period (each round pays)
@@ -36,6 +38,12 @@ func effectiveStatus(t *model.Task, now time.Time) string {
 			return "done"
 		}
 		return "doing"
+	}
+	if t.Repeat == "once" && t.Status == "pending" && t.DueAt != nil {
+		dueDayStart := time.Date(t.DueAt.Year(), t.DueAt.Month(), t.DueAt.Day(), 0, 0, 0, 0, t.DueAt.Location())
+		if !now.Before(dueDayStart) {
+			return "doing" // 截止日当天（或逾期后）自动开始
+		}
 	}
 	return t.Status
 }
