@@ -231,14 +231,24 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 		case "daily":
 			dueKey = periodKey("daily", yesterdayStart)
 			chargeAt = yesterdayStart.Add(24*time.Hour - time.Second)
-			eligible = t.CreatedAt.Before(todayStart) &&
-				t.LastDoneKey != dueKey && t.LastPenaltyKey != dueKey
+			// 用流水判定「失败周期内是否完成」——LastDoneKey 会被下一次
+			// 完成覆盖（今天完成早睡会把昨天完成的证据冲掉），流水才是事实
+			var done int64
+			db.Model(&model.Ledger{}).
+				Where("type = ? AND ref_id = ? AND created_at >= ? AND created_at < ?",
+					"task", t.ID, yesterdayStart, todayStart).
+				Count(&done)
+			eligible = t.CreatedAt.Before(todayStart) && done == 0 && t.LastPenaltyKey != dueKey
 			note = "每日任务未完成罚分：" + t.Title
 		case "weekly":
 			dueKey = periodKey("weekly", lastWeekStart)
 			chargeAt = lastWeekStart.Add(7*24*time.Hour - time.Second)
-			eligible = t.CreatedAt.Before(thisWeekStart) &&
-				t.LastDoneKey != dueKey && t.LastPenaltyKey != dueKey
+			var done int64
+			db.Model(&model.Ledger{}).
+				Where("type = ? AND ref_id = ? AND created_at >= ? AND created_at < ?",
+					"task", t.ID, lastWeekStart, thisWeekStart).
+				Count(&done)
+			eligible = t.CreatedAt.Before(thisWeekStart) && done == 0 && t.LastPenaltyKey != dueKey
 			note = "每周任务未完成罚分：" + t.Title
 		default: // once with deadline
 			if t.PenaltySettled || t.Status == "done" || t.DueAt == nil || !t.DueAt.Before(now) {
