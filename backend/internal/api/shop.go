@@ -167,8 +167,9 @@ func RedeemShopItem(db *gorm.DB) gin.HandlerFunc {
 			tx.Model(&model.Ledger{}).Select("COALESCE(SUM(amount),0) AS amount").Scan(&row)
 			balance := row.Amount
 			total := item.Price * qty
-			if balance < total {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "积分不足，还差 " + itoa(total-balance) + " 分"})
+			// 透支额度：兑换后余额最低到 PointsFloor（与罚分共用 -500）
+			if balance-total < model.PointsFloor {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "超出透支额度，还差 " + itoa(total-balance+model.PointsFloor) + " 分"})
 				return gorm.ErrDuplicatedKey
 			}
 			// cooldown check

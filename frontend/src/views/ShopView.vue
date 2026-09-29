@@ -29,10 +29,12 @@
             冷却 {{ cooldownLeft(item) }} 天
           </van-button>
           <van-button
-            v-else size="small" round :type="balance >= item.price ? 'primary' : 'default'" :disabled="balance < item.price"
+            v-else size="small" round
+            :type="balance >= item.price ? 'primary' : 'warning'"
+            :disabled="balance - item.price < -500"
             :loading="redeemingId === item.id" @click="openRedeem(item)"
           >
-            {{ balance >= item.price ? '兑换' : `还差 ${item.price - balance}` }}
+            {{ balance >= item.price ? '兑换' : (balance - item.price >= -500 ? '透支兑换' : '超透支额度') }}
           </van-button>
           <van-icon name="edit" class="del-icon" @click="openForm(item)" />
           <van-icon name="delete-o" class="del-icon" @click="remove(item)" />
@@ -54,15 +56,21 @@
           class="chip" :class="{ active: purchaseFilter === it.id }" @click="purchaseFilter = it.id; loadPurchases()"
         >{{ it.name }}</span>
       </div>
+      <div class="purchase-sum" v-if="purchaseList.length">
+        共 {{ purchaseList.length }} 笔 · 合计 <b>{{ purchaseTotal }}</b> 分
+      </div>
       <div class="purchase-list">
         <div v-for="p in purchaseList" :key="p.id" class="purchase-item">
+          <div class="purchase-icon">🛒</div>
           <div class="ledger-main">
-            <div class="p-note">{{ p.note }}</div>
-            <div class="ledger-time">{{ fmtTime(p.created_at) }}</div>
+            <div class="p-note">{{ purchaseName(p.note) }}</div>
+            <div class="ledger-time">
+              {{ fmtTime(p.created_at) }}<template v-if="purchaseQty(p.note) > 1"> · ×{{ purchaseQty(p.note) }}</template>
+            </div>
           </div>
-          <div class="ledger-amount minus">{{ p.amount }}</div>
+          <div class="purchase-amt">{{ p.amount }} <small>分</small></div>
         </div>
-        <van-empty v-if="!purchaseList.length" description="还没有购买记录" />
+        <van-empty v-if="!purchaseList.length" description="还没有购买记录" image-size="64" />
       </div>
     </van-popup>
 
@@ -97,8 +105,10 @@
           <b class="rd-total-num">{{ redeemItem.price * redeemQty }}</b>
           <span>分</span>
         </div>
-        <div class="rd-balance">兑换后剩余 {{ balance - redeemItem.price * redeemQty }} 分</div>
-        <van-button round block type="primary" style="margin-top: 18px" :loading="redeemingId != null" @click="confirmRedeem">
+        <div class="rd-balance" :class="{ over: balance - redeemItem.price * redeemQty < 0 }">
+          兑换后剩余 {{ balance - redeemItem.price * redeemQty }} 分<template v-if="balance - redeemItem.price * redeemQty < 0">（透支）</template>
+        </div>
+        <van-button round block type="primary" style="margin-top: 18px" :loading="redeemingId != null" :disabled="balance - redeemItem.price * redeemQty < -500" @click="confirmRedeem">
           确认兑换
         </van-button>
       </template>
@@ -127,7 +137,7 @@ const emptyForm = { id: null, name: '', price: '', description: '', cooldown_day
 const form = ref({ ...emptyForm })
 
 const maxQty = computed(() =>
-  redeemItem.value ? Math.max(1, Math.floor(balance.value / redeemItem.value.price)) : 1
+  redeemItem.value ? Math.max(1, Math.floor((balance.value + 500) / redeemItem.value.price)) : 1
 )
 
 const purchaseShow = ref(false)
@@ -149,6 +159,16 @@ async function loadPurchases() {
   } catch (e) {
     showToast(e)
   }
+}
+
+const purchaseTotal = computed(() => purchaseList.value.reduce((s, p) => s + p.amount, 0))
+// note 格式：「兑换：名称」或「兑换：名称 ×N」
+function purchaseName(note) {
+  return note.replace(/^兑换：/, '')
+}
+function purchaseQty(note) {
+  const m = note.match(/×(\d+)$/)
+  return m ? Number(m[1]) : 1
 }
 
 function fmtTime(s) {
@@ -269,15 +289,41 @@ async function remove(item) {
 .purchase-filter::-webkit-scrollbar { display: none; }
 .purchase-filter .chip { flex-shrink: 0; padding: 4px 12px; border-radius: 14px; background: #f7f8fa; color: #646566; font-size: 12px; border: 1px solid #ebedf0; }
 .purchase-filter .chip.active { background: #1989fa; color: #fff; border-color: #1989fa; }
-.purchase-list { flex: 1; overflow-y: auto; }
+.purchase-list { flex: 1; overflow-y: auto; margin-top: 4px; }
+.purchase-sum { text-align: center; font-size: 12px; color: #969799; margin: 8px 0 10px; }
+.purchase-sum b { color: #ee0a24; }
 .purchase-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 10px 4px;
-  border-bottom: 1px solid #f7f8fa;
+  gap: 10px;
+  background: #f7f8fa;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
 }
-.purchase-item .p-note { font-size: 14px; color: #323233; }
+.purchase-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.purchase-item .ledger-main { flex: 1; min-width: 0; }
+.purchase-item .p-note {
+  font-size: 14px;
+  font-weight: 600;
+  color: #323233;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.purchase-item .ledger-time { font-size: 11px; color: #c8c9cc; margin-top: 2px; }
+.purchase-amt { font-size: 16px; font-weight: 700; color: #ee0a24; flex-shrink: 0; }
+.purchase-amt small { font-size: 11px; font-weight: 400; }
 .shop-balance .cash { color: #ff9900; }
 .cd-chip {
   font-size: 11px;
@@ -338,4 +384,5 @@ async function remove(item) {
 }
 .rd-total-num { font-size: 34px; font-weight: 700; color: #1989fa; }
 .rd-balance { text-align: center; font-size: 12px; color: #c8c9cc; margin-top: 6px; }
+.rd-balance.over { color: #ee0a24; font-weight: 600; }
 </style>
