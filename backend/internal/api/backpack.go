@@ -160,6 +160,9 @@ func UseItem(db *gorm.DB) gin.HandlerFunc {
 				var bal int
 				tx.Model(&model.Ledger{}).Select("COALESCE(SUM(amount),0) AS amount").Scan(&bal)
 				pts := bal * 3 / 100
+				if pts < 0 {
+					pts = 0 // 负余额不计负利息
+				}
 				if err := tx.Create(&model.Ledger{Type: "item", Amount: pts, RefID: row.ID, Note: "道具「积分利息卡」利息入账"}).Error; err != nil {
 					return err
 				}

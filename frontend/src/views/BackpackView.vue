@@ -109,7 +109,7 @@ async function onBoxAction(act) {
 
 async function tapItem(it) {
   if (it.type_id === 1) {
-    const pts = Math.floor(pointBalance.value * 0.03)
+    const pts = Math.max(0, Math.floor(pointBalance.value * 0.03))
     try {
       await showConfirmDialog({
         title: '积分利息卡',

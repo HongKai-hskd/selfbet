@@ -8,6 +8,11 @@ import (
 	"gorm.io/gorm"
 )
 
+// PointsFloor is the lowest allowed point balance: penalties can push the
+// balance negative (欠账) but never below this floor. Any deduction that
+// would cross it is clamped.
+const PointsFloor = -500
+
 // Tag is a manageable group/label for tasks (replaces free-text group_name).
 type Tag struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`

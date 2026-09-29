@@ -276,8 +276,20 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 			if res.Error != nil || res.RowsAffected == 0 {
 				return gorm.ErrDuplicatedKey // settled by a concurrent request
 			}
+			// 余额地板：积分最多透支到 PointsFloor，超出部分减免
+			var bal int
+			tx.Model(&model.Ledger{}).Select("COALESCE(SUM(amount),0) AS amount").Scan(&bal)
+			pts := -t.Penalty
+			noteSuffix := ""
+			if bal+pts < model.PointsFloor {
+				pts = model.PointsFloor - bal
+				if pts >= 0 {
+					return nil // 已在地板上，本周期免扣（结算标记已记）
+				}
+				noteSuffix = "（触及 " + itoa(model.PointsFloor) + " 下限，减免 " + itoa(t.Penalty+pts) + " 分）"
+			}
 			return tx.Create(&model.Ledger{
-				Type: "penalty", Amount: -t.Penalty, RefID: t.ID, Note: note, CreatedAt: chargeAt,
+				Type: "penalty", Amount: pts, RefID: t.ID, Note: note + noteSuffix, CreatedAt: chargeAt,
 			}).Error
 		})
 	}
@@ -504,10 +516,17 @@ func itoa(n int) string {
 	if n == 0 {
 		return "0"
 	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
 	digits := ""
 	for n > 0 {
 		digits = string(rune('0'+n%10)) + digits
 		n /= 10
+	}
+	if neg {
+		digits = "-" + digits
 	}
 	return digits
 }
