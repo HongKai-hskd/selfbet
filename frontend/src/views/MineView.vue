@@ -13,8 +13,14 @@
     <div class="backpack-entry" @click="$router.push('/backpack')">
       <div class="be-icon">🎒</div>
       <div class="be-name">背包</div>
-      <div class="be-sub" v-if="me.backpack_count">{{ me.backpack_count }} 个待开</div>
-      <div class="be-sub" v-else>暂无待开物品</div>
+      <div class="be-sub" v-if="me.backpack_count">{{ me.backpack_count }} 件待处理</div>
+      <div class="be-sub" v-else>暂无待处理物品</div>
+      <van-icon name="arrow" class="be-arrow" />
+    </div>
+    <div class="backpack-entry" @click="$router.push('/schedule')">
+      <div class="be-icon">📅</div>
+      <div class="be-name">日程</div>
+      <div class="be-sub">任务计划时间一览</div>
       <van-icon name="arrow" class="be-arrow" />
     </div>
 

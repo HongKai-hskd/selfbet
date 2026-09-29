@@ -108,7 +108,7 @@ func Me(db *gorm.DB) gin.HandlerFunc {
 		// the truthful "how many times did I complete something"
 		db.Model(&model.Ledger{}).Where("type = ?", "task").Count(&done)
 		var bcount int64
-		db.Model(&model.BackpackItem{}).Where("kind = ?", "box").Count(&bcount)
+		db.Model(&model.BackpackItem{}).Count(&bcount) // 背包入口角标：宝箱+道具全部待处理件数
 		c.JSON(http.StatusOK, summary{
 			Balance:       sums.Amount,
 			TotalEarned:   sums.TotalEarned,
@@ -245,7 +245,12 @@ func UndoLedger(db *gorm.DB) gin.HandlerFunc {
 			// restore the task status when the period has no completion left
 			if task.Repeat == "once" {
 				if task.Status == "done" && n == 0 {
-					task.Status, task.CompletedAt = "doing", nil
+					task.CompletedAt = nil
+					if task.DueAt != nil && task.DueAt.After(now) {
+						task.Status = "pending" // 截止日未到，回待办（到期当天会自动开始）
+					} else {
+						task.Status = "doing" // 截止日当天/已逾期，自动进行中
+					}
 					if err := tx.Save(&task).Error; err != nil {
 						return err
 					}

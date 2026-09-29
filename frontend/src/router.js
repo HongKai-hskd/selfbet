@@ -15,7 +15,8 @@ const routes = [
   },
   // 子页面（无底部 Tab，自带返回导航）
   { path: '/backpack', component: () => import('./views/BackpackView.vue') },
-  { path: '/cash', component: () => import('./views/CashView.vue') }
+  { path: '/cash', component: () => import('./views/CashView.vue') },
+  { path: '/schedule', component: () => import('./views/ScheduleView.vue') }
 ]
 
 const router = createRouter({

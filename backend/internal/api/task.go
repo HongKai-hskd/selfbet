@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,27 +141,38 @@ func ListTasks(db *gorm.DB) gin.HandlerFunc {
 }
 
 type taskBody struct {
-	Title            string `json:"title"`
-	Points           int    `json:"points"`
-	EstimatedMinutes int    `json:"estimated_minutes"`
-	TagID            *uint  `json:"tag_id"`
-	Repeat           string `json:"repeat"`
-	BoxID            *uint  `json:"box_id"`
-	BoxDropRate      int    `json:"box_drop_rate"`
-	DueAt            string `json:"due_at"` // flexible format, parsed manually
-	Penalty          int    `json:"penalty"`
-	MultiRound       bool   `json:"multi_round"` // daily/weekly: claimable multiple times per period
+	Title             string `json:"title"`
+	Points            int    `json:"points"`
+	EstimatedMinutes  int    `json:"estimated_minutes"`
+	TagID             *uint  `json:"tag_id"`
+	Repeat            string `json:"repeat"`
+	BoxID             *uint  `json:"box_id"`
+	BoxDropRate       int    `json:"box_drop_rate"`
+	DueAt             string `json:"due_at"` // flexible format, parsed manually
+	Penalty           int    `json:"penalty"`
+	MultiRound        bool   `json:"multi_round"` // daily/weekly: claimable multiple times per period
+	ExpectedStartAt   string `json:"expected_start_at"` // once：日程计划开始
+	ExpectedEndAt     string `json:"expected_end_at"`   // once：日程计划结束
+	ExpectedStartTime string `json:"expected_start_time"` // daily/weekly：'HH:MM'
+	ExpectedEndTime   string `json:"expected_end_time"`   // daily/weekly：'HH:MM'
+	ExpectedWeekday   int    `json:"expected_weekday"`    // weekly：1=周一..7=周日
 }
 
 // parseDueAt accepts RFC3339, naive datetime and plain date strings.
 func (b *taskBody) parseDueAt() *time.Time {
-	s := strings.TrimSpace(b.DueAt)
+	return parseFlexibleTime(b.DueAt)
+}
+
+// parseFlexibleTime accepts RFC3339, naive datetime and plain date strings.
+func parseFlexibleTime(s string) *time.Time {
+	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil
 	}
 	layouts := []string{
 		"2006-01-02T15:04:05Z07:00",
 		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
 		"2006-01-02",
 	}
 	for _, l := range layouts {
@@ -200,6 +212,64 @@ func (b *taskBody) validate(db *gorm.DB) string {
 			return "分组不存在"
 		}
 	}
+	// 日程时间字段：按任务类型取不同形状，不适用类型一律清空
+	switch b.Repeat {
+	case "once":
+		b.ExpectedStartTime, b.ExpectedEndTime, b.ExpectedWeekday = "", "", 0
+		if (strings.TrimSpace(b.ExpectedStartAt) == "") != (strings.TrimSpace(b.ExpectedEndAt) == "") {
+			return "预期开始/结束时间需成对填写"
+		}
+		if strings.TrimSpace(b.ExpectedStartAt) != "" {
+			s, e := parseFlexibleTime(b.ExpectedStartAt), parseFlexibleTime(b.ExpectedEndAt)
+			if s == nil || e == nil {
+				return "预期时间格式无效"
+			}
+			if !e.After(*s) {
+				return "预期结束时间需晚于开始时间"
+			}
+		}
+	case "daily":
+		b.ExpectedStartAt, b.ExpectedEndAt, b.ExpectedWeekday = "", "", 0
+		if msg := validateTimeRange(b.ExpectedStartTime, b.ExpectedEndTime); msg != "" {
+			return msg
+		}
+	case "weekly":
+		b.ExpectedStartAt, b.ExpectedEndAt = "", ""
+		if b.ExpectedWeekday < 0 || b.ExpectedWeekday > 7 {
+			return "周几无效（1-7）"
+		}
+		if msg := validateTimeRange(b.ExpectedStartTime, b.ExpectedEndTime); msg != "" {
+			return msg
+		}
+	}
+	return ""
+}
+
+// validateTimeRange：成对填写、HH:MM 格式、结束晚于开始（允许都为空）。
+func validateTimeRange(start, end string) string {
+	start = strings.TrimSpace(start)
+	end = strings.TrimSpace(end)
+	if (start == "") != (end == "") {
+		return "计划开始/结束时间需成对填写"
+	}
+	if start == "" {
+		return ""
+	}
+	valid := func(s string) bool {
+		parts := strings.Split(s, ":")
+		if len(parts) != 2 {
+			return false
+		}
+		h, err1 := strconv.Atoi(parts[0])
+		m, err2 := strconv.Atoi(parts[1])
+		return err1 == nil && err2 == nil && h >= 0 && h <= 23 && m >= 0 && m <= 59 && len(parts[0]) == 2 && len(parts[1]) == 2
+	}
+	if !valid(start) || !valid(end) {
+		return "时间格式无效（HH:MM）"
+	}
+	if end <= start {
+		return "计划结束时间需晚于开始时间"
+	}
 	return ""
 }
 
@@ -214,6 +284,23 @@ func applyBody(t *model.Task, b *taskBody) {
 		t.DueAt = nil
 	} else {
 		t.DueAt = b.parseDueAt()
+	}
+	// 日程计划字段：按类型落位，不适用类型一律清空（纯展示，零结算语义）
+	switch b.Repeat {
+	case "once":
+		t.ExpectedStartAt = parseFlexibleTime(b.ExpectedStartAt)
+		t.ExpectedEndAt = parseFlexibleTime(b.ExpectedEndAt)
+		t.ExpectedStartTime, t.ExpectedEndTime, t.ExpectedWeekday = "", "", 0
+	case "daily":
+		t.ExpectedStartAt, t.ExpectedEndAt = nil, nil
+		t.ExpectedStartTime = strings.TrimSpace(b.ExpectedStartTime)
+		t.ExpectedEndTime = strings.TrimSpace(b.ExpectedEndTime)
+		t.ExpectedWeekday = 0
+	case "weekly":
+		t.ExpectedStartAt, t.ExpectedEndAt = nil, nil
+		t.ExpectedStartTime = strings.TrimSpace(b.ExpectedStartTime)
+		t.ExpectedEndTime = strings.TrimSpace(b.ExpectedEndTime)
+		t.ExpectedWeekday = b.ExpectedWeekday
 	}
 }
 
@@ -239,6 +326,9 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 		case "daily":
 			dueKey = periodKey("daily", yesterdayStart)
 			chargeAt = yesterdayStart.Add(24*time.Hour - time.Second)
+			if t.LastPenaltyKey == dueKey {
+				continue // 本周期已结算过（罚或免），无需再查流水
+			}
 			// 用流水判定「失败周期内是否完成」——LastDoneKey 会被下一次
 			// 完成覆盖（今天完成早睡会把昨天完成的证据冲掉），流水才是事实
 			var done int64
@@ -246,17 +336,20 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 				Where("type = ? AND ref_id = ? AND created_at >= ? AND created_at < ?",
 					"task", t.ID, yesterdayStart, todayStart).
 				Count(&done)
-			eligible = t.CreatedAt.Before(todayStart) && done == 0 && t.LastPenaltyKey != dueKey
+			eligible = t.CreatedAt.Before(todayStart) && done == 0
 			note = "每日任务未完成罚分：" + t.Title
 		case "weekly":
 			dueKey = periodKey("weekly", lastWeekStart)
 			chargeAt = lastWeekStart.Add(7*24*time.Hour - time.Second)
+			if t.LastPenaltyKey == dueKey {
+				continue
+			}
 			var done int64
 			db.Model(&model.Ledger{}).
 				Where("type = ? AND ref_id = ? AND created_at >= ? AND created_at < ?",
 					"task", t.ID, lastWeekStart, thisWeekStart).
 				Count(&done)
-			eligible = t.CreatedAt.Before(thisWeekStart) && done == 0 && t.LastPenaltyKey != dueKey
+			eligible = t.CreatedAt.Before(thisWeekStart) && done == 0
 			note = "每周任务未完成罚分：" + t.Title
 		default: // once with deadline
 			if t.PenaltySettled || t.Status == "done" || t.DueAt == nil || !t.DueAt.Before(now) {

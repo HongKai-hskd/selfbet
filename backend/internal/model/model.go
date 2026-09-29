@@ -39,6 +39,12 @@ type Task struct {
 	BoxID            *uint      `json:"box_id"`
 	BoxDropRate      int        `json:"box_drop_rate"`
 	DueAt            *time.Time `json:"due_at"` // optional deadline
+	// 日程计划时间（纯展示、零结算语义；都填齐才出现在日程表）
+	ExpectedStartAt   *time.Time `json:"expected_start_at"` // once：预期开始
+	ExpectedEndAt     *time.Time `json:"expected_end_at"`   // once：预期结束（需晚于开始）
+	ExpectedStartTime string     `json:"expected_start_time"` // daily/weekly：'HH:MM'
+	ExpectedEndTime   string     `json:"expected_end_time"`   // daily/weekly：'HH:MM'
+	ExpectedWeekday   int        `json:"expected_weekday"`    // weekly：1=周一..7=周日，0=未设
 	Status           string     `gorm:"index;default:pending" json:"status"` // API layer overwrites with effective status for repeating tasks
 	CompletedAt      *time.Time `json:"completed_at"`
 	LastDoneKey      string     `json:"-"`
