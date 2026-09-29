@@ -67,6 +67,8 @@
         <span class="hm-cell lv3" />
         <span class="hm-cell lv4" />
         <span>多</span>
+        <span class="hm-cell lv-n3" style="margin-left: 6px" />
+        <span>负</span>
       </div>
     </div>
 
@@ -235,14 +237,48 @@ const monthLabels = computed(() => {
   return labels
 })
 
+// ---- 热力图色阶：分位数自适应（GitHub 同款） ----
+// 基准来自当前视图内的数据分布，不拍脑袋定阈值：
+// 正数日按正数分位数分 4 档绿，负数日按亏损绝对值分 3 档红，
+// 最高日必为深绿、最大亏损日必为深红；切换视图范围时重算。
+
+function quantile(sorted, p) {
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]
+}
+
+const posSorted = computed(() =>
+  stats.value.heatmap.filter((c) => c.earned > 0).map((c) => c.earned).sort((a, b) => a - b)
+)
+const negSorted = computed(() =>
+  stats.value.heatmap.filter((c) => c.earned < 0).map((c) => Math.abs(c.earned)).sort((a, b) => a - b)
+)
+const posQ = computed(() =>
+  posSorted.value.length ? [0.25, 0.5, 0.75].map((p) => quantile(posSorted.value, p)) : null
+)
+const negQ = computed(() =>
+  negSorted.value.length ? [0.25, 0.5, 0.75].map((p) => quantile(negSorted.value, p)) : null
+)
+
 function cellClass(cell) {
   if (!cell) return 'lv-empty'
   const e = cell.earned
-  if (e <= 0) return 'lv0'
-  if (e < 10) return 'lv1'
-  if (e < 30) return 'lv2'
-  if (e < 60) return 'lv3'
-  return 'lv4'
+  if (e > 0) {
+    const q = posQ.value
+    if (!q) return 'lv1'
+    if (e < q[0]) return 'lv1'
+    if (e < q[1]) return 'lv2'
+    if (e < q[2]) return 'lv3'
+    return 'lv4'
+  }
+  if (e < 0) {
+    const a = Math.abs(e)
+    const q = negQ.value
+    if (!q) return 'lv-n1'
+    if (a < q[0]) return 'lv-n1'
+    if (a < q[1]) return 'lv-n2'
+    return 'lv-n3'
+  }
+  return 'lv0'
 }
 
 function showTip(cell, e) {
@@ -449,6 +485,9 @@ onMounted(() => {
 .hm-cell.lv2 { background: #40c463; }
 .hm-cell.lv3 { background: #30a14e; }
 .hm-cell.lv4 { background: #216e39; }
+.hm-cell.lv-n1 { background: #ffc9c9; }
+.hm-cell.lv-n2 { background: #ff8080; }
+.hm-cell.lv-n3 { background: #e02020; }
 .hm-cell.lv-empty { background: transparent; }
 .hm-legend {
   display: flex;
