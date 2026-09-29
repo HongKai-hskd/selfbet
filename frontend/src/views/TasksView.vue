@@ -33,7 +33,10 @@
             <span class="pts">+{{ t.points }} 分</span>
             <span v-if="t.tag_name" class="meta-item group-tag" :style="tagChipStyle(t.tag_name)">{{ t.tag_name }}</span>
             <span v-if="t.box_id" class="meta-item box-tag">🎁 {{ boxName(t.box_id) }} · {{ t.box_drop_rate }}%</span>
-            <span v-if="t.penalty" class="meta-item penalty-tag">未完成 -{{ t.penalty }}</span>
+            <span
+              v-if="t.penalty && t.status !== 'done' && !(t.multi_round && t.rounds_today)"
+              class="meta-item penalty-tag"
+            >未完成 -{{ t.penalty }}</span>
             <span v-if="t.multi_round && t.rounds_today" class="meta-item round-tag">
               🔁 {{ t.repeat === 'weekly' ? '本周' : '今日' }} {{ t.rounds_today }} 轮
             </span>
