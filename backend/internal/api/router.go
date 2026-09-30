@@ -73,8 +73,17 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			if p == "" {
 				p = "index.html"
 			}
+			isIndex := p == "index.html"
 			if _, statErr := fs.Stat(sub, p); statErr != nil {
 				c.Request.URL.Path = "/" // SPA fallback → index.html
+				p = "index.html"
+				isIndex = true
+			}
+			// 入口页禁缓存（部署后刷新即最新版）；带哈希的静态资源长缓存
+			if isIndex {
+				c.Header("Cache-Control", "no-cache")
+			} else if strings.HasPrefix(p, "assets/") {
+				c.Header("Cache-Control", "public, max-age=31536000, immutable")
 			}
 			fileServer.ServeHTTP(c.Writer, c.Request)
 		})
