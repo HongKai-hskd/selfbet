@@ -130,7 +130,7 @@ type CashFlow struct {
 const PointsPerYuan = 10 // 10 积分 = 1 元（2026-09-28 用户拍板，原 5）
 
 // Ledger records every point movement. Amount > 0 = earned, < 0 = spent.
-// Type: task | box | shop. RefID points to task/box/shop item respectively.
+// Type: task | box | shop | farm. RefID points to task/box/shop item respectively.
 type Ledger struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	Type      string    `gorm:"index" json:"type"`
@@ -140,6 +140,30 @@ type Ledger struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// FarmState 是农场小游戏的全局状态（单行，ID=1）。docs/07 v10 决议：
+// 一切消费（买地/升级）直接扣主积分；Coins（农场积分）只进不出——
+// 唯一来源是收获，唯一出口是 100:1 整数提现，纯小数缓冲零钱包。
+type FarmState struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Coins        float64   `json:"coins"`         // 农场积分余额（允许小数，展示 1 位）
+	LevelA       int       `json:"level_a"`       // 产量A：收获 +2%/级，无副作用
+	LevelB       int       `json:"level_b"`       // 产量B：收获 +6%/级，周期 +8%/级
+	LevelC       int       `json:"level_c"`       // 周期C：周期 −5%/级
+	TotalHarvest int       `json:"total_harvest"` // 累计收获轮次（里程碑展示）
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// FarmPlot 是一块田（4×6 = 24 块，plot_index 0..23）。种植免费；
+// 每田每天最多收获 2 轮，按本地日期惰性重置；成熟永不枯死、忘收不惩罚。
+type FarmPlot struct {
+	ID         uint       `gorm:"primaryKey" json:"id"`
+	PlotIndex  int        `gorm:"uniqueIndex" json:"plot_index"` // 0..23，顺序解锁
+	Unlocked   bool       `json:"unlocked"`
+	PlantedAt  *time.Time `json:"planted_at"` // nil = 空田
+	DailyCount int        `json:"daily_count"` // 当日已收获轮次（0-2）
+	DailyDate  string     `json:"daily_date"`  // 轮次计数归属的本地日期 YYYY-MM-DD
+}
+
 // Open opens (and migrates) the SQLite database stored in dataDir.
 func Open(dataDir string) (*gorm.DB, error) {
 	dsn := filepath.Join(dataDir, "selfbet.db")
@@ -147,8 +171,24 @@ func Open(dataDir string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&Task{}, &Box{}, &ShopItem{}, &Ledger{}, &Tag{}, &CashFlow{}, &BackpackItem{}, &PendingEffect{}); err != nil {
+	if err := db.AutoMigrate(&Task{}, &Box{}, &ShopItem{}, &Ledger{}, &Tag{}, &CashFlow{}, &BackpackItem{}, &PendingEffect{}, &FarmState{}, &FarmPlot{}); err != nil {
 		return nil, err
+	}
+	// 农场初始化（幂等）：单行状态 + 24 块田（仅第 1 块解锁）
+	var fsCount int64
+	db.Model(&FarmState{}).Count(&fsCount)
+	if fsCount == 0 {
+		db.Create(&FarmState{ID: 1})
+	}
+	var fpCount int64
+	db.Model(&FarmPlot{}).Count(&fpCount)
+	if fpCount < 24 {
+		for i := 0; i < 24; i++ {
+			var p FarmPlot
+			if err := db.Where("plot_index = ?", i).First(&p).Error; err != nil {
+				db.Create(&FarmPlot{PlotIndex: i, Unlocked: i == 0})
+			}
+		}
 	}
 	// 一次性迁移：旧三列固定道具概率 → item_drops JSON（0% 不迁）
 	var legacyBoxes []Box

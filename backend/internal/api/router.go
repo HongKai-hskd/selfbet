@@ -64,6 +64,13 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		authed.DELETE("/shop/:id", DeleteShopItem(db))
 		authed.POST("/shop/reorder", ReorderShop(db))
 		authed.POST("/shop/:id/redeem", RedeemShopItem(db))
+
+		authed.GET("/farm", GetFarm(db))
+		authed.POST("/farm/plant", PlantFarm(db))
+		authed.POST("/farm/harvest", HarvestFarm(db))
+		authed.POST("/farm/buy-plot", BuyFarmPlot(db))
+		authed.POST("/farm/upgrade", UpgradeFarm(db))
+		authed.POST("/farm/withdraw", WithdrawFarm(db))
 	}
 
 	// SPA static from embedded dist

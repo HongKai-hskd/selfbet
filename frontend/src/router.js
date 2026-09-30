@@ -17,6 +17,7 @@ const routes = [
   { path: '/backpack', component: () => import('./views/BackpackView.vue') },
   { path: '/cash', component: () => import('./views/CashView.vue') },
   { path: '/schedule', component: () => import('./views/ScheduleView.vue') },
+  { path: '/farm', component: () => import('./views/FarmView.vue') },
   { path: '/items-guide', component: () => import('./views/ItemsGuideView.vue') }
 ]
 

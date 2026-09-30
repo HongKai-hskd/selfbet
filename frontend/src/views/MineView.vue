@@ -23,6 +23,12 @@
       <div class="be-sub">任务计划时间一览</div>
       <van-icon name="arrow" class="be-arrow" />
     </div>
+    <div class="backpack-entry" @click="$router.push('/farm')">
+      <div class="be-icon">🌾</div>
+      <div class="be-name">农场</div>
+      <div class="be-sub">种田赚农场积分，100 = 1 积分</div>
+      <van-icon name="arrow" class="be-arrow" />
+    </div>
 
     <div class="section-title">宝箱管理</div>
     <div class="box-list">
