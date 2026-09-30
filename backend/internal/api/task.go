@@ -317,6 +317,12 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 	thisWeekStart := startOfWeek(now)
 	lastWeekStart := thisWeekStart.AddDate(0, 0, -7)
 
+	// 免罚金牌：24h 窗口内触发的结算全免（幂等标记照写，本周期不再重罚）
+	var exemptPenalty int64
+	db.Model(&model.PendingEffect{}).
+		Where("kind = ? AND expires_at > ?", "exempt_penalty", now).
+		Count(&exemptPenalty)
+
 	for i := range tasks {
 		t := &tasks[i]
 		var dueKey, note string
@@ -376,6 +382,9 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 			}
 			if res.Error != nil || res.RowsAffected == 0 {
 				return gorm.ErrDuplicatedKey // settled by a concurrent request
+			}
+			if exemptPenalty > 0 {
+				return nil // 免罚金牌生效：跳过扣分，结算标记已写防重复触发
 			}
 			// 余额地板：积分最多透支到 PointsFloor，超出部分减免
 			var bal int
@@ -490,10 +499,12 @@ func CompleteTask(db *gorm.DB) gin.HandlerFunc {
 		Name  string `json:"name"`
 		Count int    `json:"count"`
 		Item  bool   `json:"item"` // true = 开出的是道具而非待开宝箱
+		Qty   int    `json:"qty,omitempty"`
 	}
 	type result struct {
 		Task    model.Task  `json:"task"`
 		Earned  int         `json:"earned"`
+		Doubled bool        `json:"doubled,omitempty"` // 双倍卡生效
 		Box     *boxResult  `json:"box"`
 		Balance int         `json:"balance"`
 	}
@@ -531,6 +542,20 @@ func CompleteTask(db *gorm.DB) gin.HandlerFunc {
 			}
 			earned := task.Points
 			note := "完成任务：" + task.Title
+			doubled := false
+			// 双倍卡：下一个完成的任务积分 ×2（事务内先删后用，RowsAffected 防双耗）
+			var de model.PendingEffect
+			if err := tx.Where("kind = ?", "double_task").Order("id ASC").First(&de).Error; err == nil {
+				del := tx.Where("id = ?", de.ID).Delete(&model.PendingEffect{})
+				if del.Error != nil {
+					return del.Error
+				}
+				if del.RowsAffected > 0 {
+					earned = task.Points * 2
+					doubled = true
+					note += "（双倍卡×2）"
+				}
+			}
 			if task.MultiRound && (task.Repeat == "daily" || task.Repeat == "weekly") {
 				// round number = prior task-ledger rows this period + 1
 				start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
@@ -552,32 +577,42 @@ func CompleteTask(db *gorm.DB) gin.HandlerFunc {
 				return err
 			}
 			// box drop roll: the box goes to the backpack unopened — what it
-			// contains is decided when the user opens it. The three item
-			// rates roll now; a hit puts an item in the backpack instead of
-			// a box. The remainder is the chance of a plain points box.
+			// contains is decided when the user opens it. Item rates roll via
+			// the box's ItemDrops (cumulative hit, remainder = plain points
+			// box), same rule as backpack opening.
 			if task.BoxID != nil && task.BoxDropRate > 0 && rand.Intn(100) < task.BoxDropRate {
 				var box model.Box
 				if err := tx.First(&box, *task.BoxID).Error; err == nil {
 					roll := rand.Intn(100)
-					itemType := 0
-					if roll < box.ItemRatePoints {
-						itemType = 1
-					} else if roll < box.ItemRatePoints+box.ItemRateCash {
-						itemType = 2
-					} else if roll < box.ItemRatePoints+box.ItemRateCash+box.ItemRateReset {
-						itemType = 3
+					itemType, qty := 0, 1
+					acc := 0
+					for _, d := range box.ItemDrops {
+						if d.Rate <= 0 {
+							continue
+						}
+						acc += d.Rate
+						if roll < acc {
+							itemType, qty = d.ItemType, d.Qty
+							break
+						}
 					}
 					kind, typeID, name := "box", box.ID, box.Name
 					if itemType > 0 {
 						kind, typeID, name = "item", uint(itemType), itemName(uint(itemType))
 					}
-					if err := tx.Create(&model.BackpackItem{Kind: kind, TypeID: typeID, Source: lrow.ID}).Error; err != nil {
-						return err
+					n := 1
+					if itemType > 0 {
+						n = qty
 					}
-					out.Box = &boxResult{Name: name, Count: 1, Item: itemType > 0}
+					for i := 0; i < n; i++ {
+						if err := tx.Create(&model.BackpackItem{Kind: kind, TypeID: typeID, Source: lrow.ID}).Error; err != nil {
+							return err
+						}
+					}
+					out.Box = &boxResult{Name: name, Count: 1, Item: itemType > 0, Qty: qty}
 				}
 			}
-			out.Task, out.Earned = task, earned
+			out.Task, out.Earned, out.Doubled = task, earned, doubled
 			var row struct{ Amount int }
 			tx.Model(&model.Ledger{}).Select("COALESCE(SUM(amount),0) AS amount").Scan(&row)
 			out.Balance = row.Amount

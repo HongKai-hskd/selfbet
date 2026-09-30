@@ -18,34 +18,23 @@
       <div class="rule-row">· 道具使用即消耗（一张一次），使用会写入流水记录</div>
       <div class="rule-row">· 道具产出的积分/余额入账后不可撤回</div>
       <div class="rule-row">· 数量在背包中堆叠显示（×N）</div>
+      <div class="rule-row">· 触发型道具（免罚金牌/双倍卡/幸运符/运势卡）使用后进入待生效状态，触发即消耗并写入流水</div>
     </div>
   </div>
 </template>
 
 <script setup>
-const items = [
-  {
-    id: 1,
-    icon: '🪙',
-    name: '积分利息卡',
-    bg: '#fff7e6',
-    desc: '使用后立刻获得「当前积分 × 3%」的积分（向下取整）。积分为负时利息按 0 计。'
-  },
-  {
-    id: 2,
-    icon: '💴',
-    name: '余额利息卡',
-    bg: '#e8f7ee',
-    desc: '使用后立刻获得「当前现金余额 × 3%」的现金（取整到分）。'
-  },
-  {
-    id: 3,
-    icon: '🔑',
-    name: '冷却重置卡',
-    bg: '#eef3ff',
-    desc: '选择一个冷却中的商城商品，清零其冷却时间，立即可再次兑换。'
-  }
-]
+// 图鉴数据来自 /api/items/guide（后端 itemdef.go 注册表驱动），
+// 道具池变更时本页自动跟进，无需改代码
+import { ref, onMounted } from 'vue'
+import api from '../api'
+
+const items = ref([])
+const BGS = ['#fff7e6', '#e8f7ee', '#eef3ff', '#f3eefe']
+onMounted(async () => {
+  const res = await api.get('/items/guide')
+  items.value = (res.items || []).map((d, i) => ({ ...d, bg: BGS[i % BGS.length] }))
+})
 </script>
 
 <style scoped>

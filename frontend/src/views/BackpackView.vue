@@ -21,7 +21,7 @@
     <div class="grid" v-if="items.length">
       <div v-for="it in items" :key="'i' + it.type_id" class="cell" @click="tapItem(it)">
         <span class="count">×{{ it.count }}</span>
-        <div class="cell-icon">{{ itemIcon(it.type_id) }}</div>
+        <div class="cell-icon">{{ it.icon || '🎴' }}</div>
         <div class="cell-name">{{ it.name }}</div>
       </div>
     </div>
@@ -43,8 +43,8 @@
       <div class="result-list">
         <div v-for="(r, i) in openResults" :key="i" class="result-row">
           <span>宝箱 #{{ i + 1 }}</span>
-          <b v-if="r.item" class="gold">{{ itemIcons[itemIdByName(r.item)] || '🎁' }} {{ r.item }} ×{{ r.qty }}</b>
-          <b v-else class="gold">+{{ r.points }} 分</b>
+          <b v-if="r.item" class="gold">{{ r.icon || '🎴' }} {{ r.item }} ×{{ r.qty }}</b>
+          <b v-else class="gold">+{{ r.points }} 分<span v-if="r.bonus" class="bonus-tag">⚡{{ r.bonus }}</span></b>
         </div>
       </div>
       <div class="result-total" v-if="openTotal > 0">共 +{{ openTotal }} 积分</div>
@@ -78,14 +78,8 @@ const resultShow = ref(false)
 const resetPickShow = ref(false)
 const resetTargetType = ref(3)
 
-const itemIcons = { 1: '🪙', 2: '💴', 3: '🔑' }
-const itemNames = { 1: '积分利息卡', 2: '余额利息卡', 3: '冷却重置卡' }
-function itemIdByName(name) {
-  for (const k in itemNames) if (itemNames[k] === name) return Number(k)
-  return 0
-}
-const itemIcon = (t) => itemIcons[t] || '🎴'
-
+// 道具元数据（icon/名称/交互模式/确认文案）全部来自 /backpack 接口，
+// 后端 itemdef.go 注册表驱动——新增 confirm 型道具这里零改动
 async function load() {
   const [bp, me, cash] = await Promise.all([api.get('/backpack'), api.get('/me'), api.get('/cash', { params: { limit: 1 } })])
   boxes.value = bp.boxes || []
@@ -118,33 +112,35 @@ async function onBoxAction(act) {
 }
 
 async function tapItem(it) {
+  // 即时结算型（弹窗带动态金额）：利息卡两张保留前端计算
   if (it.type_id === 1) {
     const pts = Math.max(0, Math.floor(pointBalance.value * 0.03))
     try {
       await showConfirmDialog({
-        title: '积分利息卡',
+        title: it.name,
         message: pts > 0
           ? `使用后立刻获得当前积分的 3%：\n+${pts} 分（当前积分 ${pointBalance.value}）`
           : '当前积分利息为 0 分，确认使用？'
       })
     } catch { return }
-    const res = await api.post('/backpack/use', { type_id: 1 })
+    const res = await api.post('/backpack/use', { type_id: it.type_id })
     showToast(`利息 +${res.points} 分已到账`)
     load()
   } else if (it.type_id === 2) {
     const yuan = (Math.floor(cashBalanceCents.value * 0.03) / 100).toFixed(2)
     try {
       await showConfirmDialog({
-        title: '余额利息卡',
+        title: it.name,
         message: parseFloat(yuan) > 0
           ? `使用后立刻获得当前余额的 3%：\n+¥${yuan}（当前余额 ¥${(cashBalanceCents.value / 100).toFixed(2)}）`
           : '当前余额利息为 ¥0.00，确认使用？'
       })
     } catch { return }
-    const res = await api.post('/backpack/use', { type_id: 2 })
+    const res = await api.post('/backpack/use', { type_id: it.type_id })
     showToast(`利息 +¥${(res.cents / 100).toFixed(2)} 已到账`)
     load()
-  } else if (it.type_id === 3) {
+  } else if (it.use_mode === 'shop_cooldown') {
+    // 选目标商品的道具（如冷却重置卡）
     const shop = await api.get('/shop')
     const cooling = (shop.items || []).filter((s) => {
       if (!s.last_redeemed_at || !s.cooldown_days) return false
@@ -152,8 +148,27 @@ async function tapItem(it) {
     })
     if (!cooling.length) return showToast('没有冷却中的商品')
     resetColumns.value = cooling.map((s) => ({ text: s.name, value: s.id }))
-    resetTargetType.value = 3
+    resetTargetType.value = it.type_id
     resetPickShow.value = true
+  } else {
+    // 通用确认型：文案与激活提示全部来自后端注册表
+    confirmUse(it.name, it.use_prompt || '确认使用？', it.type_id)
+  }
+}
+
+// 统一确认弹窗 → 使用 → toast → 刷新（确认型道具共用）
+async function confirmUse(title, message, typeId) {
+  try {
+    await showConfirmDialog({ title, message })
+  } catch { return }
+  try {
+    const res = await api.post('/backpack/use', { type_id: typeId })
+    showToast(res.settled_today !== undefined && res.settled_today > 0
+      ? `金牌已挂（24h 免罚）。注意：今天已有 ${res.settled_today} 笔罚分在金牌前结算，不返还`
+      : (res.message || '已使用'))
+    load()
+  } catch (e) {
+    showToast(e)
   }
 }
 
@@ -228,6 +243,7 @@ onMounted(load)
   border-bottom: 1px solid #f2f3f5;
 }
 .gold { color: #ff9900; }
+.bonus-tag { font-size: 11px; margin-left: 4px; }
 .result-total { font-size: 15px; font-weight: 600; margin: 12px 0 4px; }
 .result-btn { margin-top: 16px; }
 </style>

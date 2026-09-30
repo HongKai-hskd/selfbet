@@ -4,8 +4,8 @@
     <div class="reward-card" v-if="visible">
       <template v-if="phase === 'task'">
         <div class="reward-label">{{ data.taskTitle }}</div>
-        <div class="reward-amount bounce">+{{ data.taskPoints }}</div>
-        <div class="reward-unit">积分到账</div>
+        <div class="reward-amount bounce" :class="{ gold: data.doubled }">+{{ data.taskPoints }}</div>
+        <div class="reward-unit">积分到账<span v-if="data.doubled" class="doubled-tag">⚡ 双倍卡生效</span></div>
         <!-- 掉落进背包的宝箱/道具直接跟在任务积分下方，手快收下也不会错过 -->
         <div class="box-inline" v-if="data.boxName">
           <span class="box-inline-icon">🎁</span>
@@ -42,9 +42,10 @@ watch(
     if (!r) return
     data.value = {
       taskTitle: r.task && r.task.title,
-      taskPoints: r.task && r.task.points,
+      taskPoints: r.doubled ? r.earned : (r.task && r.task.points),
+      doubled: !!r.doubled,
       boxName: r.box && r.box.name,
-      boxCount: (r.box && r.box.count) || 1,
+      boxCount: (r.box && (r.box.qty || r.box.count)) || 1,
       total: r.earned
     }
     visible.value = true
@@ -100,6 +101,15 @@ function close() {
   margin-top: 6px;
   color: #969799;
   font-size: 13px;
+}
+.doubled-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  background: #fff7e6;
+  border-radius: 8px;
+  font-size: 11px;
+  color: #ff9900;
 }
 .reward-total {
   font-size: 20px;

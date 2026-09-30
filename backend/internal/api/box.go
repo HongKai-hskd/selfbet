@@ -39,7 +39,8 @@ func (b *boxBody) validate() string {
 	sum := 0
 	seen := map[int]bool{}
 	for _, d := range b.ItemDrops {
-		if d.ItemType < 1 || d.ItemType > 3 {
+		// 道具池校验走注册表（itemdef.go 单一来源），新增道具自动可用
+		if _, ok := itemDef(uint(d.ItemType)); !ok {
 			return "道具类型无效"
 		}
 		if seen[d.ItemType] {

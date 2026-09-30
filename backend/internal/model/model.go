@@ -89,6 +89,18 @@ type BackpackItem struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// PendingEffect is an armed one-shot item effect waiting for its trigger.
+// Kind: double_task (next task completion ×2) | lucky_box (next box
+// opening ×2) | boost_box (next box min/max ×2) | exempt_penalty (skip
+// penalty settlement while active). ExpiresAt gates exempt_penalty (24h
+// window); the other kinds have no expiry and are consumed on trigger.
+type PendingEffect struct {
+	ID        uint       `gorm:"primaryKey" json:"id"`
+	Kind      string     `gorm:"index" json:"kind"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
 // ShopItem is a redeemable reward defined by the user. SortOrder is the
 // manual display order set by drag-and-drop (0 = newest on top).
 // CooldownDays > 0 blocks re-redemption for that many days after a purchase.
@@ -135,7 +147,7 @@ func Open(dataDir string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&Task{}, &Box{}, &ShopItem{}, &Ledger{}, &Tag{}, &CashFlow{}, &BackpackItem{}); err != nil {
+	if err := db.AutoMigrate(&Task{}, &Box{}, &ShopItem{}, &Ledger{}, &Tag{}, &CashFlow{}, &BackpackItem{}, &PendingEffect{}); err != nil {
 		return nil, err
 	}
 	// 一次性迁移：旧三列固定道具概率 → item_drops JSON（0% 不迁）

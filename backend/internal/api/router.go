@@ -31,6 +31,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		authed.POST("/backpack/open", OpenBoxes(db))
 		authed.POST("/backpack/use", UseItem(db))
 
+		authed.GET("/items/guide", ItemsGuideHandler())
+
 		authed.GET("/tasks", ListTasks(db))
 		authed.POST("/tasks", CreateTask(db))
 		authed.PUT("/tasks/:id", UpdateTask(db))

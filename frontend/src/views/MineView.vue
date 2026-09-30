@@ -53,7 +53,7 @@
           <van-field v-model="boxForm.max_points" type="digit" label="最多积分" placeholder="50" :rules="[{ required: true, message: '必填' }]" />
           <div class="drops-head">
             <span>道具掉落（剩余 {{ pointsRate }}% 开积分 {{ boxForm.min_points || 0 }}~{{ boxForm.max_points || 0 }}）</span>
-            <van-button size="mini" round plain type="primary" :disabled="boxForm.item_drops.length >= 3" @click="addDropRow">+ 添加</van-button>
+            <van-button size="mini" round plain type="primary" :disabled="boxForm.item_drops.length >= itemPool.length" @click="addDropRow">+ 添加</van-button>
           </div>
           <div v-for="(row, idx) in boxForm.item_drops" :key="idx" class="drop-row">
             <van-field readonly is-link :model-value="dropTypeName(row.item_type)" @click="openDropTypePicker(idx)" />
@@ -208,18 +208,19 @@ const tagListEl = ref(null)
 let tagSortable = null
 const boxFormShow = ref(false)
 const boxForm = ref({ id: null, name: '', min_points: '', max_points: '', item_drops: [] })
-const DROP_NAMES = { 1: '积分利息卡', 2: '余额利息卡', 3: '冷却重置卡' }
-const dropTypeName = (t) => DROP_NAMES[t] || '选择道具'
+// 道具池来自 /api/items/guide（后端注册表驱动），新增道具自动可选
+const itemPool = ref([])
+const dropTypeName = (t) => (itemPool.value.find((d) => d.id === t) || {}).name || '选择道具'
 const dropPickShow = ref(false)
 const dropPickIdx = ref(-1)
-const dropPickColumns = Object.entries(DROP_NAMES).map(([v, text]) => ({ text, value: Number(v) }))
+const dropPickColumns = computed(() => itemPool.value.map((d) => ({ text: d.name, value: d.id })))
 
 const dropRateSum = computed(() => boxForm.value.item_drops.reduce((s, r) => s + (parseInt(r.rate) || 0), 0))
 const pointsRate = computed(() => Math.max(0, 100 - dropRateSum.value))
 
 function addDropRow() {
   const used = boxForm.value.item_drops.map((r) => r.item_type)
-  const free = dropPickColumns.find((c) => !used.includes(c.value))
+  const free = dropPickColumns.value.find((c) => !used.includes(c.value))
   if (!free) return
   boxForm.value.item_drops.push({ item_type: free.value, rate: '', qty: '1' })
 }
@@ -248,12 +249,13 @@ const remaining = computed(() => me.value.balance - (parseInt(exchangePoints.val
 const spendAfter = computed(() => cashBalance.value / 100 - (parseFloat(spendYuanStr.value) || 0))
 
 async function load() {
-  const [m, b, t, c] = await Promise.all([api.get('/me'), api.get('/boxes'), api.get('/tags'), api.get('/cash')])
+  const [m, b, t, c, guide] = await Promise.all([api.get('/me'), api.get('/boxes'), api.get('/tags'), api.get('/cash'), api.get('/items/guide')])
   me.value = m
   boxes.value = b.items || []
   tags.value = t.items || []
   cashBalance.value = c.balance_cents
   cashFlows.value = c.items || []
+  itemPool.value = guide.items || []
   initTagSortable()
 }
 
