@@ -113,7 +113,7 @@ type itemUse func(tx *gorm.DB, c *gin.Context, row model.BackpackItem, targetID 
 // armPending is the shared implementation for trigger-type items: insert a
 // pending_effects row (optionally expiring) plus a 0-point audit ledger row.
 // armedMsg is the toast shown after activation.
-func armPending(def ItemDef, armedMsg string, extra func(tx *gorm.DB) gin.H) itemUse {
+func armPending(def ItemDef, armedMsg string) itemUse {
 	return func(tx *gorm.DB, c *gin.Context, row model.BackpackItem, _ uint) (gin.H, error) {
 		eff := model.PendingEffect{Kind: def.PendingKind}
 		if def.PendingTTL > 0 {
@@ -126,13 +126,7 @@ func armPending(def ItemDef, armedMsg string, extra func(tx *gorm.DB) gin.H) ite
 		if err := tx.Create(&model.Ledger{Type: "item", Amount: 0, RefID: row.ID, Note: "道具「" + def.Name + "」激活"}).Error; err != nil {
 			return nil, err
 		}
-		out := gin.H{"message": armedMsg}
-		if extra != nil {
-			for k, v := range extra(tx) {
-				out[k] = v
-			}
-		}
-		return out, nil
+		return gin.H{"message": armedMsg}, nil
 	}
 }
 
@@ -140,14 +134,8 @@ var itemUses = map[uint]itemUse{
 	1: useInterestPoints,
 	2: useInterestCash,
 	3: useResetCooldown,
-	4: armPending(itemDefByID[4], "金牌已挂上：24 小时内触发的补罚全免", func(tx *gorm.DB) gin.H {
-		now := time.Now()
-		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		var settledToday int64
-		tx.Model(&model.Ledger{}).Where("type = ? AND amount < 0 AND created_at >= ?", "penalty", todayStart).Count(&settledToday)
-		return gin.H{"settled_today": settledToday}
-	}),
-	5: armPending(itemDefByID[5], "幸运符已激活：下一个开启的宝箱积分 ×2", nil),
-	6: armPending(itemDefByID[6], "双倍卡已激活：下一个完成的任务积分 ×2", nil),
-	7: armPending(itemDefByID[7], "运势卡已激活：下一个宝箱区间 ×2（如 10~100 → 20~200）", nil),
+	4: armPending(itemDefByID[4], "金牌已挂上：24 小时内触发的补罚全免（已结算的罚分不返还）"),
+	5: armPending(itemDefByID[5], "幸运符已激活：下一个开启的宝箱积分 ×2"),
+	6: armPending(itemDefByID[6], "双倍卡已激活：下一个完成的任务积分 ×2"),
+	7: armPending(itemDefByID[7], "运势卡已激活：下一个宝箱区间 ×2（如 10~100 → 20~200）"),
 }

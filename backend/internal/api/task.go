@@ -384,7 +384,15 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 				return gorm.ErrDuplicatedKey // settled by a concurrent request
 			}
 			if exemptPenalty > 0 {
-				return nil // 免罚金牌生效：跳过扣分，结算标记已写防重复触发
+				// 免罚金牌生效：跳过扣分（幂等标记已写防重复触发），
+				// 留 0 分审计行让"哪个任务哪个周期被豁免"在流水可查
+				if err := tx.Create(&model.Ledger{
+					Type: "penalty", Amount: 0, RefID: t.ID,
+					Note: "免罚金牌豁免：" + note, CreatedAt: now,
+				}).Error; err != nil {
+					return err
+				}
+				return nil
 			}
 			// 余额地板：积分最多透支到 PointsFloor，超出部分减免
 			var bal int

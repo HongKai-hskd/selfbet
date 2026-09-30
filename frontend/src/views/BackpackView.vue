@@ -163,9 +163,7 @@ async function confirmUse(title, message, typeId) {
   } catch { return }
   try {
     const res = await api.post('/backpack/use', { type_id: typeId })
-    showToast(res.settled_today !== undefined && res.settled_today > 0
-      ? `金牌已挂（24h 免罚）。注意：今天已有 ${res.settled_today} 笔罚分在金牌前结算，不返还`
-      : (res.message || '已使用'))
+    showToast(res.message || '已使用')
     load()
   } catch (e) {
     showToast(e)
