@@ -407,15 +407,19 @@ func CreateTask(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
-		// append to the end of the manual display order (a zero would
-		// jump above everything the user has already arranged)
-		var maxSort int
-		db.Model(&model.Task{}).Select("COALESCE(MAX(sort_order), 0)").Scan(&maxSort)
-		task := model.Task{
-			Status:    "pending",
-			SortOrder: maxSort + 1,
-		}
+		// 新任务排到所属分区（同分组/未分组）的最前面：
+		// 分区内最小 sort_order - 1（空分区为 -1），新加的当前关注点一眼可见
+		task := model.Task{Status: "pending"}
 		applyBody(&task, &body)
+		var minSort int
+		q := db.Model(&model.Task{})
+		if task.TagID == nil {
+			q = q.Where("tag_id IS NULL")
+		} else {
+			q = q.Where("tag_id = ?", *task.TagID)
+		}
+		q.Select("COALESCE(MIN(sort_order), 0)").Scan(&minSort)
+		task.SortOrder = minSort - 1
 		if err := db.Create(&task).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
