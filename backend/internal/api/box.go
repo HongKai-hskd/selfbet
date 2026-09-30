@@ -23,12 +23,10 @@ func ListBoxes(db *gorm.DB) gin.HandlerFunc {
 }
 
 type boxBody struct {
-	Name           string `json:"name"`
-	MinPoints      int    `json:"min_points"`
-	MaxPoints      int    `json:"max_points"`
-	ItemRatePoints int    `json:"item_rate_points"`
-	ItemRateCash   int    `json:"item_rate_cash"`
-	ItemRateReset  int    `json:"item_rate_reset"`
+	Name      string            `json:"name"`
+	MinPoints int               `json:"min_points"`
+	MaxPoints int               `json:"max_points"`
+	ItemDrops []model.ItemDrop `json:"item_drops"` // 动态道具掉落配置；剩余概率=开积分
 }
 
 func (b *boxBody) validate() string {
@@ -38,9 +36,26 @@ func (b *boxBody) validate() string {
 	if b.MinPoints < 0 || b.MaxPoints < b.MinPoints {
 		return "积分范围无效（最小值 ≥ 0 且最大值 ≥ 最小值）"
 	}
-	if b.ItemRatePoints < 0 || b.ItemRateCash < 0 || b.ItemRateReset < 0 ||
-		b.ItemRatePoints+b.ItemRateCash+b.ItemRateReset > 100 {
-		return "道具概率无效（三项之和不能超过 100）"
+	sum := 0
+	seen := map[int]bool{}
+	for _, d := range b.ItemDrops {
+		if d.ItemType < 1 || d.ItemType > 3 {
+			return "道具类型无效"
+		}
+		if seen[d.ItemType] {
+			return "同一道具不能配置多行"
+		}
+		seen[d.ItemType] = true
+		if d.Rate < 0 || d.Rate > 100 {
+			return "道具概率需在 0-100 之间"
+		}
+		if d.Qty < 1 || d.Qty > 99 {
+			return "道具数量需在 1-99 之间"
+		}
+		sum += d.Rate
+	}
+	if sum > 100 {
+		return "道具概率之和不能超过 100（剩余概率开积分）"
 	}
 	return ""
 }
@@ -58,7 +73,8 @@ func CreateBox(db *gorm.DB) gin.HandlerFunc {
 		}
 		box := model.Box{
 			Name: body.Name, MinPoints: body.MinPoints, MaxPoints: body.MaxPoints,
-			ItemRatePoints: body.ItemRatePoints, ItemRateCash: body.ItemRateCash, ItemRateReset: body.ItemRateReset,
+			ItemDrops:        body.ItemDrops,
+			ItemRatePoints:   0, ItemRateCash: 0, ItemRateReset: 0, // 旧列停用
 		}
 		if err := db.Create(&box).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -85,7 +101,8 @@ func UpdateBox(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		box.Name, box.MinPoints, box.MaxPoints = body.Name, body.MinPoints, body.MaxPoints
-		box.ItemRatePoints, box.ItemRateCash, box.ItemRateReset = body.ItemRatePoints, body.ItemRateCash, body.ItemRateReset
+		box.ItemDrops = body.ItemDrops
+		box.ItemRatePoints, box.ItemRateCash, box.ItemRateReset = 0, 0, 0 // 旧列停用
 		if err := db.Save(&box).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

@@ -72,7 +72,9 @@ func ListBackpack(db *gorm.DB) gin.HandlerFunc {
 // random amount inside its min~max range as a box ledger row.
 func OpenBoxes(db *gorm.DB) gin.HandlerFunc {
 	type openResult struct {
-		Points int `json:"points"`
+		Points int    `json:"points"`
+		Item   string `json:"item,omitempty"` // 命中道具时非空
+		Qty    int    `json:"qty,omitempty"`
 	}
 	return func(c *gin.Context) {
 		var body struct {
@@ -103,7 +105,6 @@ func OpenBoxes(db *gorm.DB) gin.HandlerFunc {
 		total := 0
 		err := db.Transaction(func(tx *gorm.DB) error {
 			for _, r := range rows {
-				pts := box.MinPoints + rand.Intn(span+1)
 				// RowsAffected=0 说明该箱已被并发请求消费，跳过防双开
 				del := tx.Where("id = ?", r.ID).Delete(&model.BackpackItem{})
 				if del.Error != nil {
@@ -112,6 +113,30 @@ func OpenBoxes(db *gorm.DB) gin.HandlerFunc {
 				if del.RowsAffected == 0 {
 					continue
 				}
+				// 道具判定：累积概率落点（剩余概率=积分）。道具概率从未在旧逻辑生效，本次为首次实现
+				roll := rand.Intn(100) // 0..99
+				acc := 0
+				itemType, qty := 0, 0
+				for _, d := range box.ItemDrops {
+					if d.Rate <= 0 {
+						continue
+					}
+					acc += d.Rate
+					if roll < acc {
+						itemType, qty = d.ItemType, d.Qty
+						break
+					}
+				}
+				if itemType > 0 {
+					for i := 0; i < qty; i++ {
+						if err := tx.Create(&model.BackpackItem{Kind: "item", TypeID: uint(itemType), Source: r.ID}).Error; err != nil {
+							return err
+						}
+					}
+					results = append(results, openResult{Item: itemName(uint(itemType)), Qty: qty})
+					continue
+				}
+				pts := box.MinPoints + rand.Intn(span+1)
 				if err := tx.Create(&model.Ledger{Type: "box", Amount: pts, RefID: box.ID, Note: "宝箱「" + box.Name + "」开出"}).Error; err != nil {
 					return err
 				}

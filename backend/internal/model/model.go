@@ -57,14 +57,23 @@ type Task struct {
 
 // Box is a user-defined box type. Opening it grants a random amount of
 // points between MinPoints and MaxPoints (inclusive).
+// ItemDrop 是宝箱的道具掉落配置：rate% 概率开到该道具，开到时一次进背包 qty 张。
+type ItemDrop struct {
+	ItemType int `json:"item_type"` // 1=积分利息卡 2=余额利息卡 3=冷却重置卡
+	Rate     int `json:"rate"`      // 0-100
+	Qty      int `json:"qty"`       // 1-99
+}
+
 type Box struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	Name           string    `gorm:"not null" json:"name"`
-	MinPoints      int       `json:"min_points"`
-	MaxPoints      int       `json:"max_points"`
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	Name      string `gorm:"not null" json:"name"`
+	MinPoints int    `json:"min_points"`
+	MaxPoints int    `json:"max_points"`
+	ItemDrops []ItemDrop `json:"item_drops" gorm:"serializer:json"` // 动态道具掉落配置；剩余概率=开积分
+	// 已废弃：旧的三列固定道具概率，由 ItemDrops 取代（保留列兼容旧库，不再读写业务值）
 	ItemRatePoints int       `json:"item_rate_points"` // % 积分利息卡
 	ItemRateCash   int       `json:"item_rate_cash"`   // % 余额利息卡
-	ItemRateReset  int       `json:"item_rate_reset"`  // % 冷却重置卡（剩余概率=开积分）
+	ItemRateReset  int       `json:"item_rate_reset"`  // % 冷却重置卡
 	CreatedAt      time.Time `json:"created_at"`
 }
 
@@ -128,6 +137,23 @@ func Open(dataDir string) (*gorm.DB, error) {
 	}
 	if err := db.AutoMigrate(&Task{}, &Box{}, &ShopItem{}, &Ledger{}, &Tag{}, &CashFlow{}, &BackpackItem{}); err != nil {
 		return nil, err
+	}
+	// 一次性迁移：旧三列固定道具概率 → item_drops JSON（0% 不迁）
+	var legacyBoxes []Box
+	if err := db.Where("item_drops IS NULL OR item_drops = ''").Find(&legacyBoxes).Error; err == nil {
+		for _, b := range legacyBoxes {
+			drops := []ItemDrop{}
+			for _, d := range []struct {
+				t int
+				r int
+			}{{1, b.ItemRatePoints}, {2, b.ItemRateCash}, {3, b.ItemRateReset}} {
+				if d.r > 0 {
+					drops = append(drops, ItemDrop{ItemType: d.t, Rate: d.r, Qty: 1})
+				}
+			}
+			b.ItemDrops = drops
+			db.Save(&b)
+		}
 	}
 	// one-time lazy migration: legacy free-text group_name → Tag rows
 	var legacy []Task

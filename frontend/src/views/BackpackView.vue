@@ -1,6 +1,10 @@
 <template>
   <div class="page">
-    <van-nav-bar title="背包" left-arrow @click-left="$router.back()" />
+    <van-nav-bar title="背包" left-arrow @click-left="$router.back()" @click-right="$router.push('/items-guide')">
+      <template #right>
+        <van-icon name="question-o" size="18" />
+      </template>
+    </van-nav-bar>
 
     <div class="section-head">宝箱 <span class="hint">点按开启</span></div>
     <div class="grid" v-if="boxes.length">
@@ -39,10 +43,11 @@
       <div class="result-list">
         <div v-for="(r, i) in openResults" :key="i" class="result-row">
           <span>宝箱 #{{ i + 1 }}</span>
-          <b class="gold">+{{ r.points }} 分</b>
+          <b v-if="r.item" class="gold">{{ itemIcons[itemIdByName(r.item)] || '🎁' }} {{ r.item }} ×{{ r.qty }}</b>
+          <b v-else class="gold">+{{ r.points }} 分</b>
         </div>
       </div>
-      <div class="result-total">共 +{{ openTotal }} 积分</div>
+      <div class="result-total" v-if="openTotal > 0">共 +{{ openTotal }} 积分</div>
       <van-button round block type="primary" class="result-btn" @click="resultShow = false">收下</van-button>
     </van-popup>
 
@@ -74,6 +79,11 @@ const resetPickShow = ref(false)
 const resetTargetType = ref(3)
 
 const itemIcons = { 1: '🪙', 2: '💴', 3: '🔑' }
+const itemNames = { 1: '积分利息卡', 2: '余额利息卡', 3: '冷却重置卡' }
+function itemIdByName(name) {
+  for (const k in itemNames) if (itemNames[k] === name) return Number(k)
+  return 0
+}
 const itemIcon = (t) => itemIcons[t] || '🎴'
 
 async function load() {

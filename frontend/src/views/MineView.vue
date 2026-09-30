@@ -42,7 +42,7 @@
     <van-button block round plain type="primary" icon="plus" class="add-box-btn" @click="openBoxForm()">
       新建宝箱类型
     </van-button>
-    <div class="tip">在任务里关联宝箱并设置掉率；掉落的宝箱进背包，开启时才入账。三项道具概率之和 ≤ 100，剩余概率开积分</div>
+    <div class="tip">在任务里关联宝箱并设置掉率；掉落的宝箱进背包，开启时才入账。道具掉落概率之和 ≤ 100，剩余概率开积分（数量 = 开到时一次进背包几张）</div>
 
     <van-popup v-model:show="boxFormShow" round position="bottom" style="padding: 20px 16px 28px">
       <div class="form-title">{{ boxForm.id ? '编辑宝箱' : '新建宝箱' }}</div>
@@ -51,14 +51,24 @@
           <van-field v-model="boxForm.name" label="名称" placeholder="小奖励 / 大奖池" :rules="[{ required: true, message: '请填名称' }]" />
           <van-field v-model="boxForm.min_points" type="digit" label="最少积分" placeholder="5" :rules="[{ required: true, message: '必填' }]" />
           <van-field v-model="boxForm.max_points" type="digit" label="最多积分" placeholder="50" :rules="[{ required: true, message: '必填' }]" />
-          <van-field v-model="boxForm.item_rate_points" type="digit" label="利息卡(积分)%" placeholder="0" />
-          <van-field v-model="boxForm.item_rate_cash" type="digit" label="利息卡(余额)%" placeholder="0" />
-          <van-field v-model="boxForm.item_rate_reset" type="digit" label="重置卡%" placeholder="0" />
+          <div class="drops-head">
+            <span>道具掉落（剩余 {{ pointsRate }}% 开积分 {{ boxForm.min_points || 0 }}~{{ boxForm.max_points || 0 }}）</span>
+            <van-button size="mini" round plain type="primary" :disabled="boxForm.item_drops.length >= 3" @click="addDropRow">+ 添加</van-button>
+          </div>
+          <div v-for="(row, idx) in boxForm.item_drops" :key="idx" class="drop-row">
+            <van-field readonly is-link :model-value="dropTypeName(row.item_type)" @click="openDropTypePicker(idx)" />
+            <van-field v-model="row.rate" type="digit" label="概率%" placeholder="0-100" />
+            <van-field v-model="row.qty" type="digit" label="数量" placeholder="1" />
+            <van-icon name="delete-o" class="drop-del" @click="boxForm.item_drops.splice(idx, 1)" />
+          </div>
         </van-cell-group>
         <div style="margin: 16px 16px 0">
           <van-button round block type="primary" native-type="submit">保存</van-button>
         </div>
       </van-form>
+    </van-popup>
+    <van-popup v-model:show="dropPickShow" round position="bottom">
+      <van-picker :columns="dropPickColumns" title="选择道具" @confirm="onDropTypePick" @cancel="dropPickShow = false" />
     </van-popup>
     <div class="section-title">余额（现金）</div>
     <div class="cash-card">
@@ -197,7 +207,32 @@ const TAG_COLORS = ['#1989fa', '#07c160', '#00b8d4', '#7232dd', '#ff6699', '#ff9
 const tagListEl = ref(null)
 let tagSortable = null
 const boxFormShow = ref(false)
-const boxForm = ref({ id: null, name: '', min_points: '', max_points: '', item_rate_points: '', item_rate_cash: '', item_rate_reset: '' })
+const boxForm = ref({ id: null, name: '', min_points: '', max_points: '', item_drops: [] })
+const DROP_NAMES = { 1: '积分利息卡', 2: '余额利息卡', 3: '冷却重置卡' }
+const dropTypeName = (t) => DROP_NAMES[t] || '选择道具'
+const dropPickShow = ref(false)
+const dropPickIdx = ref(-1)
+const dropPickColumns = Object.entries(DROP_NAMES).map(([v, text]) => ({ text, value: Number(v) }))
+
+const dropRateSum = computed(() => boxForm.value.item_drops.reduce((s, r) => s + (parseInt(r.rate) || 0), 0))
+const pointsRate = computed(() => Math.max(0, 100 - dropRateSum.value))
+
+function addDropRow() {
+  const used = boxForm.value.item_drops.map((r) => r.item_type)
+  const free = dropPickColumns.find((c) => !used.includes(c.value))
+  if (!free) return
+  boxForm.value.item_drops.push({ item_type: free.value, rate: '', qty: '1' })
+}
+
+function openDropTypePicker(idx) {
+  dropPickIdx.value = idx
+  dropPickShow.value = true
+}
+
+function onDropTypePick({ selectedOptions }) {
+  boxForm.value.item_drops[dropPickIdx.value].item_type = selectedOptions[0].value
+  dropPickShow.value = false
+}
 const cashBalance = ref(0)
 const cashFlows = ref([])
 const exchangeShow = ref(false)
@@ -337,11 +372,11 @@ function openBoxForm(b) {
     ? {
         id: b.id, name: b.name,
         min_points: String(b.min_points), max_points: String(b.max_points),
-        item_rate_points: String(b.item_rate_points || 0),
-        item_rate_cash: String(b.item_rate_cash || 0),
-        item_rate_reset: String(b.item_rate_reset || 0)
+        item_drops: (b.item_drops || []).map((d) => ({
+          item_type: d.item_type, rate: String(d.rate), qty: String(d.qty)
+        }))
       }
-    : { id: null, name: '', min_points: '', max_points: '', item_rate_points: '', item_rate_cash: '', item_rate_reset: '' }
+    : { id: null, name: '', min_points: '', max_points: '', item_drops: [] }
   boxFormShow.value = true
 }
 
@@ -351,9 +386,11 @@ async function saveBox() {
     name: f.name,
     min_points: parseInt(f.min_points) || 0,
     max_points: parseInt(f.max_points) || 0,
-    item_rate_points: parseInt(f.item_rate_points) || 0,
-    item_rate_cash: parseInt(f.item_rate_cash) || 0,
-    item_rate_reset: parseInt(f.item_rate_reset) || 0
+    item_drops: f.item_drops.map((r) => ({
+      item_type: r.item_type,
+      rate: parseInt(r.rate) || 0,
+      qty: parseInt(r.qty) || 1
+    }))
   }
   try {
     if (f.id) await api.put(`/boxes/${f.id}`, body)
@@ -419,6 +456,22 @@ async function removeBox(b) {
 .del-icon { color: #c8c9cc; font-size: 17px; padding: 4px; }
 .add-box-btn { margin-top: 4px; }
 .tip { text-align: center; font-size: 12px; color: #c8c9cc; margin-top: 14px; padding: 0 20px; }
+.drops-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px 4px;
+  font-size: 12px;
+  color: #969799;
+}
+.drop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+.drop-row .van-field { flex: 1; padding: 6px 8px; background: #f7f8fa; border-radius: 8px; }
+.drop-row .drop-del { font-size: 16px; color: #ee0a24; padding: 0 4px; flex-shrink: 0; }
 .drag-handle {
   color: #c8c9cc;
   font-size: 18px;
@@ -450,6 +503,7 @@ async function removeBox(b) {
   background: linear-gradient(135deg, #e8f3ff, #f0f7ff);
   border-radius: 12px;
   padding: 12px 16px;
+  margin-top: 14px;
   margin-bottom: 16px;
   cursor: pointer;
 }
