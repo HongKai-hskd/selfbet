@@ -78,7 +78,7 @@
         <div class="up-name">{{ line.name }} <span class="up-lv">Lv{{ line.level }}<template v-if="!line.maxed"> → {{ line.level + 1 }}</template></span></div>
         <div class="up-desc">{{ line.desc }}</div>
       </div>
-      <van-button size="small" round type="primary" :disabled="line.maxed" :loading="busy" @click="doUpgrade(line)">
+      <van-button size="small" round type="primary" :color="line.color" :disabled="line.maxed" :loading="busy" @click="doUpgrade(line)">
         {{ line.maxed ? '已满级' : line.priceLabel }}
       </van-button>
     </div>
@@ -125,11 +125,11 @@ const upgradeLines = computed(() => {
       desc: `生长周期 -5%，收获来得更快。当前 ${fmtHours(f.period_hours)}`
     },
     {
-      key: 'D', name: '丰收祝福', level: f.level_d, priceLabel: fmtK(f.upgrade_d.price), maxed: f.upgrade_d.maxed,
+      key: 'D', name: '丰收祝福', level: f.level_d, priceLabel: fmtK(f.upgrade_d.price) + ' 分', maxed: f.upgrade_d.maxed, color: '#10b981',
       desc: `每日结算：昨日收益 ×${10 * f.level_d}% 发额外奖励，但罚分也同步放大。当前罚分系数 ×${f.penalty_coef.toFixed(2)}。扣农场积分`
     },
     {
-      key: 'E', name: '灾祸减免', level: f.level_e, priceLabel: fmtK(f.upgrade_e.price), maxed: f.upgrade_e.maxed,
+      key: 'E', name: '灾祸减免', level: f.level_e, priceLabel: fmtK(f.upgrade_e.price) + ' 分', maxed: f.upgrade_e.maxed, color: '#10b981',
       desc: `对冲丰收祝福的罚分放大（每级抵 10%，只对冲不独立减罚）。当前罚分系数 ×${f.penalty_coef.toFixed(2)}。扣农场积分`
     }
   ]
@@ -330,6 +330,7 @@ onUnmounted(() => clearInterval(timer))
   gap: 10px;
 }
 .up-main { flex: 1; min-width: 0; }
+.up-card .van-button { min-width: 80px; justify-content: center; }
 .up-name { font-size: 15px; font-weight: 500; color: #323233; }
 .up-lv { font-size: 12px; color: #1989fa; font-weight: 400; margin-left: 4px; }
 .up-desc { font-size: 12px; color: #969799; margin-top: 2px; }
