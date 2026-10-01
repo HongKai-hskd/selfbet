@@ -38,7 +38,7 @@
           <span class="mchip" :class="{ on: heatWeeks === 53 }" @click="setHeatWeeks(53)">一年</span>
         </div>
       </div>
-      <div class="hm-scroll">
+      <div class="hm-scroll" ref="hmScrollEl">
         <div class="hm-inner">
           <div class="hm-months">
             <span
@@ -142,7 +142,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { showToast, showConfirmDialog } from 'vant'
 import api from '../api'
 
@@ -195,6 +195,9 @@ function dateStr(d) {
 async function loadStats() {
   const s = await api.get('/stats', { params: { weeks: heatWeeks.value } })
   stats.value = s
+  // 热力图默认滚到最右：最新日期永远直接可见
+  await nextTick()
+  if (hmScrollEl.value) hmScrollEl.value.scrollLeft = hmScrollEl.value.scrollWidth
 }
 
 function setHeatWeeks(w) {
@@ -202,6 +205,8 @@ function setHeatWeeks(w) {
   heatWeeks.value = w
   loadStats()
 }
+
+const hmScrollEl = ref(null)
 
 const heatColumns = computed(() => {
   const list = stats.value.heatmap || []

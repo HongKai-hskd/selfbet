@@ -205,11 +205,12 @@ func Open(driver, dsn, dataDir string) (*gorm.DB, error) {
 	if sCount == 0 {
 		db.Create(&Settings{SettingKey: AuthPasswordKey, Value: DefaultPassword})
 	}
-	// 连接池上限：防止连接数膨胀吃满 max_connections（远程共享库时尤其重要）
+	// 连接池上限：防止连接数膨胀吃满 max_connections（远程共享库时尤其重要）。
+	// MaxIdle 必须等于 MaxOpen——远程库建连要 500ms+，池内连接一个都不许扔
 	if sqlDB, err := db.DB(); err == nil {
 		sqlDB.SetMaxOpenConns(4)
-		sqlDB.SetMaxIdleConns(2)
-		sqlDB.SetConnMaxLifetime(5 * time.Minute)
+		sqlDB.SetMaxIdleConns(4)
+		sqlDB.SetConnMaxLifetime(30 * time.Minute)
 	}
 	// 农场初始化（幂等）：单行状态 + 24 块田（仅第 1 块解锁）
 	var fsCount int64

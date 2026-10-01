@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -24,13 +26,29 @@ func TokenFor(password string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// authPassword reads the login password from the settings table (fallback: default).
+// authPassword reads the login password from the settings table.
+// 远程库模式下每条 SQL 都是一次跨公网往返（~64ms），密码极少变化——
+// 进程内缓存 60 秒，避免每个 API 请求都白付一次往返。
+var (
+	authPwdMu     sync.Mutex
+	authPwdCache  string
+	authPwdLoaded time.Time
+)
+
 func authPassword(db *gorm.DB) string {
+	authPwdMu.Lock()
+	defer authPwdMu.Unlock()
+	if !authPwdLoaded.IsZero() && time.Since(authPwdLoaded) < time.Minute {
+		return authPwdCache
+	}
 	var s model.Settings
 	if err := db.Where("setting_key = ?", model.AuthPasswordKey).First(&s).Error; err == nil && s.Value != "" {
-		return s.Value
+		authPwdCache = s.Value
+	} else if authPwdCache == "" {
+		authPwdCache = model.DefaultPassword
 	}
-	return model.DefaultPassword
+	authPwdLoaded = time.Now()
+	return authPwdCache
 }
 
 // Login checks the password (settings 表) and returns the bearer token.
