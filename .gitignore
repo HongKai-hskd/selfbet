@@ -9,9 +9,8 @@ backend/server.exe~
 *.exe
 backend/server-linux-*
 
-# ---- 数据与密钥（生产库 + 密码，绝不入库；仅放行备份脚本）----
-backend/data/*
-!backend/data/backup.bat
+# ---- 数据与密钥（db 连接配置，绝不入库）----
+backend/config.json
 
 # ---- AI 会话数据（项目记忆，非代码）----
 .workbuddy/
@@ -20,3 +19,4 @@ backend/data/*
 Thumbs.db
 Desktop.ini
 .DS_Store
+*.log

@@ -19,9 +19,9 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	r := gin.Default()
 
 	apiGroup := r.Group("/api")
-	apiGroup.POST("/auth/login", Login(cfg))
+	apiGroup.POST("/auth/login", Login(db))
 
-	authed := apiGroup.Group("", Auth(cfg))
+	authed := apiGroup.Group("", Auth(db))
 	{
 		authed.GET("/me", Me(db))
 		authed.GET("/ledger", ListLedger(db))

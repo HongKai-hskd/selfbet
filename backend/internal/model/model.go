@@ -1,10 +1,13 @@
 package model
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -16,7 +19,7 @@ const PointsFloor = -500
 // Tag is a manageable group/label for tasks (replaces free-text group_name).
 type Tag struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	Name      string    `gorm:"uniqueIndex;not null" json:"name"`
+	Name      string    `gorm:"uniqueIndex;size:191;not null" json:"name"`
 	Color     string    `gorm:"default:'#1989fa'" json:"color"` // hex color for chips (e.g. #07c160)
 	SortOrder int       `gorm:"index" json:"sort_order"`        // manual display order (drag & drop)
 	CreatedAt time.Time `json:"created_at"`
@@ -45,7 +48,7 @@ type Task struct {
 	ExpectedStartTime string     `json:"expected_start_time"` // daily/weekly：'HH:MM'
 	ExpectedEndTime   string     `json:"expected_end_time"`   // daily/weekly：'HH:MM'
 	ExpectedWeekday   int        `json:"expected_weekday"`    // weekly：1=周一..7=周日，0=未设
-	Status           string     `gorm:"index;default:pending" json:"status"` // API layer overwrites with effective status for repeating tasks
+	Status           string     `gorm:"index;size:32;default:pending" json:"status"` // API layer overwrites with effective status for repeating tasks
 	CompletedAt      *time.Time `json:"completed_at"`
 	LastDoneKey      string     `json:"-"`
 	SortOrder        int        `gorm:"index" json:"sort_order"` // manual display order (drag & drop)
@@ -83,7 +86,7 @@ type Box struct {
 // dropped it, so undoing that completion recalls the unopened box.
 type BackpackItem struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	Kind      string    `gorm:"index" json:"kind"` // box | item
+	Kind      string    `gorm:"index;size:16" json:"kind"` // box | item
 	TypeID    uint      `gorm:"index" json:"type_id"`
 	Source    uint      `gorm:"index" json:"source"`
 	CreatedAt time.Time `json:"created_at"`
@@ -96,7 +99,7 @@ type BackpackItem struct {
 // window); the other kinds have no expiry and are consumed on trigger.
 type PendingEffect struct {
 	ID        uint       `gorm:"primaryKey" json:"id"`
-	Kind      string     `gorm:"index" json:"kind"`
+	Kind      string     `gorm:"index;size:32" json:"kind"`
 	ExpiresAt *time.Time `json:"expires_at"`
 	CreatedAt time.Time  `json:"created_at"`
 }
@@ -133,7 +136,7 @@ const PointsPerYuan = 10 // 10 积分 = 1 元（2026-09-28 用户拍板，原 5�
 // Type: task | box | shop | farm. RefID points to task/box/shop item respectively.
 type Ledger struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	Type      string    `gorm:"index" json:"type"`
+	Type      string    `gorm:"index;size:32" json:"type"`
 	Amount    int       `json:"amount"`
 	RefID     uint      `json:"ref_id"`
 	Note      string    `json:"note"`
@@ -164,15 +167,43 @@ type FarmPlot struct {
 	DailyDate  string     `json:"daily_date"`  // 轮次计数归属的本地日期 YYYY-MM-DD
 }
 
-// Open opens (and migrates) the SQLite database stored in dataDir.
-func Open(dataDir string) (*gorm.DB, error) {
-	dsn := filepath.Join(dataDir, "selfbet.db")
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+// Settings 是键值配置表：登录密码等运行时设置存这里（替代旧 config.json 的密码字段）。
+type Settings struct {
+	SettingKey string `gorm:"column:setting_key;primaryKey;size:64" json:"key"`
+	Value      string `json:"value"`
+}
+
+// AuthPasswordKey 是登录密码在 settings 表里的键。
+const AuthPasswordKey = "auth_password"
+
+// DefaultPassword 是 settings 表无记录时的兜底密码（首次启动 seed 用）。
+const DefaultPassword = "kaytodo"
+
+// Open opens (and migrates) the database: driver = "mysql"（用 dsn）或 "sqlite"（用 dataDir/selfbet.db）。
+func Open(driver, dsn, dataDir string) (*gorm.DB, error) {
+	var db *gorm.DB
+	var err error
+	switch driver {
+	case "mysql":
+		if dsn == "" {
+			return nil, fmt.Errorf("db_driver=mysql 但 db_dsn 为空")
+		}
+		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	default: // sqlite
+		_ = os.MkdirAll(dataDir, 0o755) // config.Load 不再创建 data 目录，sqlite 模式自行确保
+		db, err = gorm.Open(sqlite.Open(filepath.Join(dataDir, "selfbet.db")), &gorm.Config{})
+	}
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&Task{}, &Box{}, &ShopItem{}, &Ledger{}, &Tag{}, &CashFlow{}, &BackpackItem{}, &PendingEffect{}, &FarmState{}, &FarmPlot{}); err != nil {
+	if err := db.AutoMigrate(&Task{}, &Box{}, &ShopItem{}, &Ledger{}, &Tag{}, &CashFlow{}, &BackpackItem{}, &PendingEffect{}, &FarmState{}, &FarmPlot{}, &Settings{}); err != nil {
 		return nil, err
+	}
+	// settings 种子：登录密码（已存在则不动）
+	var sCount int64
+	db.Model(&Settings{}).Where("setting_key = ?", AuthPasswordKey).Count(&sCount)
+	if sCount == 0 {
+		db.Create(&Settings{SettingKey: AuthPasswordKey, Value: DefaultPassword})
 	}
 	// 农场初始化（幂等）：单行状态 + 24 块田（仅第 1 块解锁）
 	var fsCount int64

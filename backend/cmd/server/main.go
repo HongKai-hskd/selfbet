@@ -14,7 +14,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
-	db, err := model.Open(config.DataDir())
+	db, err := model.Open(cfg.DbDriver, cfg.DbDsn, config.DataDir())
 	if err != nil {
 		log.Fatalf("打开数据库失败: %v", err)
 	}
