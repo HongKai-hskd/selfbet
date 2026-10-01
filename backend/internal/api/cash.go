@@ -8,84 +8,78 @@ import (
 	"gorm.io/gorm"
 
 	"selfbet/backend/internal/model"
+	"selfbet/backend/internal/service"
 )
 
 // ---- Cash wallet: points → yuan exchange + manual spending records ----
-
-func cashBalance(db *gorm.DB) int {
-	var row struct {
-		Sum int
-	}
-	db.Model(&model.CashFlow{}).Select("COALESCE(SUM(amount_cents),0) AS sum").Scan(&row)
-	return row.Sum
-}
+//
+// 兑换/消费的事务在 service/cashx.go；本文件只有钱包明细查询与薄 handler。
 
 // GetCash returns wallet balance and flows. Optional filters (mirroring
 // the stats detail page): start_date/end_date (YYYY-MM-DD, local, end
-// exclusive) and type = in|out. earned_cents / spent_cents sum within the
-// selected range.
+// exclusive) and type = in|out. earned_cents / spent_cents sum over the
+// whole filtered range (items are additionally capped at 500 rows).
+// 过滤全部下推 SQL：旧实现先 Limit(500) 再内存过滤，筛选范围超出最新
+// 500 条时会漏行、汇总也会错，这里一并修正。
 func GetCash(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		flows := []model.CashFlow{}
-		if err := db.Order("created_at DESC, id DESC").Limit(500).Find(&flows).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
 		startStr, endStr := c.Query("start_date"), c.Query("end_date")
 		var startTime, endTime time.Time
-		hasRange := false
 		if startStr != "" {
 			if t, err := time.ParseInLocation("2006-01-02", startStr, time.Local); err == nil {
-				startTime, hasRange = t, true
+				startTime = t
+			} else {
+				startStr = ""
 			}
 		}
 		if endStr != "" {
 			if t, err := time.ParseInLocation("2006-01-02", endStr, time.Local); err == nil {
-				endTime, hasRange = t.AddDate(0, 0, 1), true
+				endTime = t.AddDate(0, 0, 1) // exclusive
+			} else {
+				endStr = ""
 			}
 		}
 		typeSel := c.Query("type") // in | out | ""
-		items := []model.CashFlow{}
-		earned, spent := 0, 0
-		for _, f := range flows {
-			if hasRange {
-				if startStr != "" && f.CreatedAt.Before(startTime) {
-					continue
-				}
-				if endStr != "" && !f.CreatedAt.Before(endTime) {
-					continue
-				}
+		conds := func(q *gorm.DB) *gorm.DB {
+			if startStr != "" {
+				q = q.Where("created_at >= ?", startTime)
 			}
-			if typeSel == "in" && f.AmountCents < 0 {
-				continue
+			if endStr != "" {
+				q = q.Where("created_at < ?", endTime)
 			}
-			if typeSel == "out" && f.AmountCents > 0 {
-				continue
+			switch typeSel {
+			case "in":
+				q = q.Where("amount_cents > 0")
+			case "out":
+				q = q.Where("amount_cents < 0")
 			}
-			if f.AmountCents > 0 {
-				earned += f.AmountCents
-			} else {
-				spent += -f.AmountCents
-			}
-			items = append(items, f)
+			return q
 		}
+		items := []model.CashFlow{}
+		if err := conds(db.Model(&model.CashFlow{})).
+			Order("created_at DESC, id DESC").Limit(500).Find(&items).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		var sums struct {
+			Earned int
+			Spent  int
+		}
+		conds(db.Model(&model.CashFlow{})).Select(
+			"COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END),0) AS earned",
+			"COALESCE(SUM(CASE WHEN amount_cents < 0 THEN -amount_cents ELSE 0 END),0) AS spent",
+		).Scan(&sums)
 		c.JSON(http.StatusOK, gin.H{
-			"balance_cents": cashBalance(db),
+			"balance_cents": service.CashBalance(db),
 			"items":         items,
-			"earned_cents":  earned,
-			"spent_cents":   spent,
+			"earned_cents":  sums.Earned,
+			"spent_cents":   sums.Spent,
 		})
 	}
 }
 
-// ExchangeCash converts points to wallet cents at model.PointsPerYuan.
-// points must be a positive multiple of 5 (whole yuan).
+// ExchangeCash delegates to service.ExchangeCash.
 func ExchangeCash(db *gorm.DB) gin.HandlerFunc {
-	type result struct {
-		BalanceCents int   `json:"balance_cents"`
-		Cents        int   `json:"cents"`
-		PointBalance int   `json:"point_balance"`
-	}
 	return func(c *gin.Context) {
 		var body struct {
 			Points int `json:"points"`
@@ -94,36 +88,16 @@ func ExchangeCash(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
 			return
 		}
-		if body.Points <= 0 || body.Points%model.PointsPerYuan != 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "兑换积分必须是 " + itoa(model.PointsPerYuan) + " 的倍数"})
-			return
-		}
-		var out result
-		err := db.Transaction(func(tx *gorm.DB) error {
-			var prow struct{ Amount int }
-			tx.Model(&model.Ledger{}).Select("COALESCE(SUM(amount),0) AS amount").Scan(&prow)
-			if prow.Amount < body.Points {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "积分不足，还差 " + itoa(body.Points-prow.Amount) + " 分"})
-				return gorm.ErrDuplicatedKey
-			}
-			cents := body.Points / model.PointsPerYuan * 100
-			if err := tx.Create(&model.Ledger{Type: "cash", Amount: -body.Points, Note: "兑换余额 ¥" + itoa(cents/100)}).Error; err != nil {
-				return err
-			}
-			if err := tx.Create(&model.CashFlow{AmountCents: cents, Note: "积分兑换（" + itoa(body.Points) + " 分）"}).Error; err != nil {
-				return err
-			}
-			out = result{BalanceCents: cashBalance(tx), Cents: cents, PointBalance: prow.Amount - body.Points}
-			return nil
-		})
+		out, err := service.ExchangeCash(db, body.Points)
 		if err != nil {
+			writeErr(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, out)
 	}
 }
 
-// SpendCash manually records a real-world purchase (deducts wallet balance).
+// SpendCash delegates to service.SpendCash.
 func SpendCash(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
@@ -134,29 +108,9 @@ func SpendCash(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
 			return
 		}
-		if body.Cents <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "金额无效"})
-			return
-		}
-		if body.Note == "" {
-			body.Note = "日常消费"
-		}
-		var out struct {
-			BalanceCents int `json:"balance_cents"`
-		}
-		err := db.Transaction(func(tx *gorm.DB) error {
-			balance := cashBalance(tx)
-			if balance < body.Cents {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "余额不足"})
-				return gorm.ErrDuplicatedKey
-			}
-			if err := tx.Create(&model.CashFlow{AmountCents: -body.Cents, Note: body.Note}).Error; err != nil {
-				return err
-			}
-			out.BalanceCents = balance - body.Cents
-			return nil
-		})
+		out, err := service.SpendCash(db, body.Cents, body.Note)
 		if err != nil {
+			writeErr(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, out)

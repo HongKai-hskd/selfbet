@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,8 +13,20 @@ import (
 
 	"selfbet/backend/internal/config"
 	"selfbet/backend/internal/model"
+	"selfbet/backend/internal/service"
 	"selfbet/backend/web"
 )
+
+// writeErr 统一错误出口：*service.BizError → 其状态码与文案；
+// 其余按基础设施错误 500。与旧实现的响应格式完全一致（{error: msg}）。
+func writeErr(c *gin.Context, err error) {
+	var be *service.BizError
+	if errors.As(err, &be) {
+		c.JSON(be.Code, gin.H{"error": be.Msg})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+}
 
 // NewRouter wires up every route. Static files come from the embedded dist.
 func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
@@ -138,153 +152,79 @@ func Me(db *gorm.DB) gin.HandlerFunc {
 }
 
 // ListLedger returns recent point movements (newest first).
-// Optional start_date / end_date (YYYY-MM-DD, local) filter in memory.
+// Optional type / ref_id / start_date / end_date (YYYY-MM-DD, local) filters
+// are pushed down to SQL; range_sum is the net amount over the whole filtered
+// range (items are additionally capped by limit).
 func ListLedger(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit := 100
-		if v := atoi(c.Query("limit")); v > 0 && v <= 2000 {
+		if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 && v <= 2000 {
 			limit = v
 		}
-		all := []model.Ledger{}
-		q := db.Order("created_at DESC, id DESC")
-		if t := c.Query("type"); t != "" {
-			q = q.Where("type = ?", t)
-		}
-		if v := atoi(c.Query("ref_id")); v > 0 {
-			q = q.Where("ref_id = ?", v)
-		}
-		if err := q.Find(&all).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
+		typeFilter := c.Query("type")
+		refID, _ := strconv.Atoi(c.Query("ref_id"))
 		startStr, endStr := c.Query("start_date"), c.Query("end_date")
 		var startTime, endTime time.Time
-		hasRange := false
 		if startStr != "" {
 			if t, err := time.ParseInLocation("2006-01-02", startStr, time.Local); err == nil {
-				startTime, hasRange = t, true
+				startTime = t
+			} else {
+				startStr = ""
 			}
 		}
 		if endStr != "" {
 			if t, err := time.ParseInLocation("2006-01-02", endStr, time.Local); err == nil {
-				endTime, hasRange = t.AddDate(0, 0, 1), true // exclusive
+				endTime = t.AddDate(0, 0, 1) // exclusive
+			} else {
+				endStr = ""
 			}
+		}
+		conds := func(q *gorm.DB) *gorm.DB {
+			if typeFilter != "" {
+				q = q.Where("type = ?", typeFilter)
+			}
+			if refID > 0 {
+				q = q.Where("ref_id = ?", refID)
+			}
+			if startStr != "" {
+				q = q.Where("created_at >= ?", startTime)
+			}
+			if endStr != "" {
+				q = q.Where("created_at < ?", endTime)
+			}
+			return q
 		}
 		items := []model.Ledger{}
-		rangeSum := 0 // 范围内净额（含罚分等负数行）
-		for _, r := range all {
-			if hasRange {
-				if startStr != "" && r.CreatedAt.Before(startTime) {
-					continue
-				}
-				if endStr != "" && !r.CreatedAt.Before(endTime) {
-					continue
-				}
-			}
-			rangeSum += r.Amount
-			items = append(items, r)
+		if err := conds(db.Model(&model.Ledger{})).Order("created_at DESC, id DESC").Limit(limit).Find(&items).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
 		}
-		if len(items) > limit {
-			items = items[:limit]
+		var rangeRow struct {
+			Sum int
 		}
-		var row model.Ledger
-		db.Model(&model.Ledger{}).Select("COALESCE(SUM(amount),0) AS amount").Scan(&row)
-		c.JSON(http.StatusOK, gin.H{"items": items, "balance": int(row.Amount), "range_sum": rangeSum})
+		conds(db.Model(&model.Ledger{})).Select("COALESCE(SUM(amount),0) AS sum").Scan(&rangeRow)
+		c.JSON(http.StatusOK, gin.H{
+			"items":     items,
+			"balance":   service.PointBalance(db),
+			"range_sum": rangeRow.Sum,
+		})
 	}
 }
 
-func atoi(s string) int {
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0
-		}
-		n = n*10 + int(r-'0')
-	}
-	return n
-}
-
-// UndoLedger removes a same-day task-completion or box-drop ledger row.
-// For task rows the task status is restored: once → doing; repeating task's
-// LastDoneKey cleared when no completion remains in the period (multi-round
-// rounds re-count from ledger automatically). Penalty/shop rows are not
-// undoable (penalty would be re-charged by lazy settle; shop involves
-// cooldown rollback).
+// UndoLedger removes a same-day task-completion or box-drop ledger row via
+// service.UndoLedgerRow (business rules live there).
 func UndoLedger(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var row model.Ledger
-		if err := db.First(&row, c.Param("id")).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "记录不存在"})
-			return
-		}
-		if row.Type != "task" && row.Type != "box" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "只有任务完成和宝箱开出的记录可以撤回"})
-			return
-		}
-		now := time.Now()
-		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		if row.CreatedAt.Before(todayStart) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "只能撤回今天获得的记录"})
-			return
-		}
-		err := db.Transaction(func(tx *gorm.DB) error {
-			if row.Type == "box" {
-				// box rows are standalone: delete and done
-				return tx.Delete(&row).Error
-			}
-			var task model.Task
-			if err := tx.First(&task, row.RefID).Error; err != nil {
-				c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在或已删除"})
-				return err
-			}
-			if err := tx.Delete(&row).Error; err != nil {
-				return err
-			}
-			// 撤回任务完成 = 整次作废：该次掉落进背包的未开宝箱/道具一并收回
-			if row.Type == "task" {
-				if err := tx.Where("source = ?", row.ID).Delete(&model.BackpackItem{}).Error; err != nil {
-					return err
-				}
-			}
-			// remaining completions of this task in the current period
-			// (in-memory date filtering, same convention as the stats page)
-			var rows []model.Ledger
-			tx.Where("type = ? AND ref_id = ?", "task", task.ID).Find(&rows)
-			start := todayStart
-			if task.Repeat == "weekly" {
-				start = startOfWeek(now)
-			}
-			n := 0
-			for _, l := range rows {
-				if l.ID != row.ID && !l.CreatedAt.Before(start) {
-					n++
-				}
-			}
-			// restore the task status when the period has no completion left
-			if task.Repeat == "once" {
-				if task.Status == "done" && n == 0 {
-					task.CompletedAt = nil
-					if task.DueAt != nil && task.DueAt.After(now) {
-						task.Status = "pending" // 截止日未到，回待办（到期当天会自动开始）
-					} else {
-						task.Status = "doing" // 截止日当天/已逾期，自动进行中
-					}
-					if err := tx.Save(&task).Error; err != nil {
-						return err
-					}
-				}
-			} else if task.LastDoneKey == periodKey(task.Repeat, now) && n == 0 {
-				// single-round daily/weekly becomes claimable again; for
-				// multi-round tasks this is a no-op safeguard
-				if err := tx.Model(&task).Updates(map[string]any{"last_done_key": "", "completed_at": nil}).Error; err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+		id64, err := strconv.ParseUint(c.Param("id"), 10, 64)
 		if err != nil {
-			return // response already written inside the transaction
+			writeErr(c, service.BizErr(404, "记录不存在"))
+			return
 		}
-		c.JSON(http.StatusOK, gin.H{"ok": true, "undone": row.Amount})
+		undone, err := service.UndoLedgerRow(db, uint(id64), time.Now())
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "undone": undone})
 	}
 }

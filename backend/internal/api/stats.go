@@ -3,12 +3,14 @@ package api
 import (
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"selfbet/backend/internal/model"
+	"selfbet/backend/internal/service"
 )
 
 // Stats provides the dashboard aggregates for the stats page.
@@ -20,26 +22,19 @@ type period struct {
 }
 
 type heatDay struct {
-	Date   string `json:"date"` // 2006-01-02
-	Weekday int   `json:"weekday"` // 0=Mon .. 6=Sun
-	Weeks  int    `json:"weeks"`   // column index from start
-	Earned int    `json:"earned"`
+	Date    string `json:"date"` // 2006-01-02
+	Weekday int    `json:"weekday"` // 0=Mon .. 6=Sun
+	Weeks   int    `json:"weeks"`   // column index from start
+	Earned  int    `json:"earned"`
 }
 
 func dayKey(t time.Time) string {
 	return t.Format("2006-01-02")
 }
 
-func startOfWeek(t time.Time) time.Time {
-	// Monday-based week start
-	offset := (int(t.Weekday()) + 6) % 7
-	d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-	return d.AddDate(0, 0, -offset)
-}
-
 func GetStats(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		SettlePenalties(db, time.Now())
+		service.SettlePenalties(db, time.Now())
 		var rows []model.Ledger
 		if err := db.Select("amount", "created_at").Find(&rows).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -48,15 +43,15 @@ func GetStats(db *gorm.DB) gin.HandlerFunc {
 
 		now := time.Now()
 		todayKey, yKey := dayKey(now), dayKey(now.AddDate(0, 0, -1))
-		thisWeekStart := startOfWeek(now)
+		thisWeekStart := service.StartOfWeek(now)
 		lastWeekStart := thisWeekStart.AddDate(0, 0, -7)
 		monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 		lastMonthStart := monthStart.AddDate(0, -1, 0)
 
 		var (
 			today, yesterday, thisWeek, lastWeek, thisMonth, lastMonth period
-			heat                                                        = map[string]int{}
-			yesterdayItems                                              []model.Ledger
+			heat                                                       = map[string]int{}
+			yesterdayItems                                             []model.Ledger
 		)
 		for _, r := range rows {
 			k := dayKey(r.CreatedAt)
@@ -84,10 +79,10 @@ func GetStats(db *gorm.DB) gin.HandlerFunc {
 
 		// heatmap: weeks param (26 default, up to 53 ≈ one year), columns aligned to Monday
 		weeks := 26
-		if v := atoi(c.Query("weeks")); v >= 4 && v <= 53 {
+		if v, err := strconv.Atoi(c.Query("weeks")); err == nil && v >= 4 && v <= 53 {
 			weeks = v
 		}
-		start := startOfWeek(now).AddDate(0, 0, -(weeks-1)*7)
+		start := service.StartOfWeek(now).AddDate(0, 0, -(weeks-1)*7)
 		heatList := []heatDay{}
 		for d := start; !d.After(now); d = d.AddDate(0, 0, 1) {
 			k := dayKey(d)

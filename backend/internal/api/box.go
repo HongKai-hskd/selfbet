@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"selfbet/backend/internal/model"
+	"selfbet/backend/internal/service"
 )
 
 // ---- Box types (fully user-defined) ----
@@ -26,7 +27,7 @@ type boxBody struct {
 	Name      string            `json:"name"`
 	MinPoints int               `json:"min_points"`
 	MaxPoints int               `json:"max_points"`
-	ItemDrops []model.ItemDrop `json:"item_drops"` // 动态道具掉落配置；剩余概率=开积分
+	ItemDrops []model.ItemDrop `json:"item_drops"` // 动态道具掉落配置；道具为附加掉落，积分必得
 }
 
 func (b *boxBody) validate() string {
@@ -39,8 +40,8 @@ func (b *boxBody) validate() string {
 	sum := 0
 	seen := map[int]bool{}
 	for _, d := range b.ItemDrops {
-		// 道具池校验走注册表（itemdef.go 单一来源），新增道具自动可用
-		if _, ok := itemDef(uint(d.ItemType)); !ok {
+		// 道具池校验走注册表（service/itemdef.go 单一来源），新增道具自动可用
+		if _, ok := service.LookupItem(uint(d.ItemType)); !ok {
 			return "道具类型无效"
 		}
 		if seen[d.ItemType] {
@@ -56,7 +57,7 @@ func (b *boxBody) validate() string {
 		sum += d.Rate
 	}
 	if sum > 100 {
-		return "道具概率之和不能超过 100（剩余概率开积分）"
+		return "道具概率之和不能超过 100（道具为附加掉落，不影响积分）"
 	}
 	return ""
 }

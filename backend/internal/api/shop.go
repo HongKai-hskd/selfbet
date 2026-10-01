@@ -2,12 +2,13 @@ package api
 
 import (
 	"net/http"
-	"time"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"selfbet/backend/internal/model"
+	"selfbet/backend/internal/service"
 )
 
 // ---- Shop items & redemption ----
@@ -138,73 +139,22 @@ func ReorderShop(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
-// RedeemShopItem spends price × quantity, records one ledger entry and
-// counts the redemption. Quantity is optional (default 1).
+// RedeemShopItem delegates to service.RedeemShopItem (overdraft floor,
+// cooldown check and ledger write happen in one service transaction).
 func RedeemShopItem(db *gorm.DB) gin.HandlerFunc {
-	type result struct {
-		Balance  int            `json:"balance"`
-		Item     model.ShopItem `json:"item"`
-		Quantity int            `json:"quantity"`
-		Total    int            `json:"total"`
-	}
 	return func(c *gin.Context) {
 		var body struct {
 			Quantity int `json:"quantity"`
 		}
 		_ = c.ShouldBindJSON(&body) // body optional
-		qty := body.Quantity
-		if qty < 1 {
-			qty = 1
-		}
-		var out result
-		err := db.Transaction(func(tx *gorm.DB) error {
-			var item model.ShopItem
-			if err := tx.First(&item, c.Param("id")).Error; err != nil {
-				c.JSON(http.StatusNotFound, gin.H{"error": "商品不存在"})
-				return gorm.ErrRecordNotFound
-			}
-			var row struct{ Amount int }
-			tx.Model(&model.Ledger{}).Select("COALESCE(SUM(amount),0) AS amount").Scan(&row)
-			balance := row.Amount
-			total := item.Price * qty
-			// 透支额度：兑换后余额最低到 PointsFloor（与罚分共用 -500）
-			if balance-total < model.PointsFloor {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "超出透支额度，还差 " + itoa(total-balance+model.PointsFloor) + " 分"})
-				return gorm.ErrDuplicatedKey
-			}
-			// cooldown check
-			if item.CooldownDays > 0 && item.LastRedeemedAt != nil {
-				cd := time.Duration(item.CooldownDays) * 24 * time.Hour
-				elapsed := time.Since(*item.LastRedeemedAt)
-				if elapsed < cd {
-					remain := cd - elapsed
-					msg := "冷却中，还剩 " + itoa(int(remain.Hours())/24) + " 天 " + itoa(int(remain.Hours())%24) + " 小时"
-					c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-					return gorm.ErrDuplicatedKey
-				}
-			}
-			note := "兑换：" + item.Name
-			if qty > 1 {
-				note += " ×" + itoa(qty)
-			}
-			if err := tx.Create(&model.Ledger{Type: "shop", Amount: -total, RefID: item.ID, Note: note}).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&item).UpdateColumn("redeemed_count", gorm.Expr("redeemed_count + ?", qty)).Error; err != nil {
-				return err
-			}
-			if item.CooldownDays > 0 {
-				now := time.Now()
-				if err := tx.Model(&item).Update("last_redeemed_at", now).Error; err != nil {
-					return err
-				}
-				item.LastRedeemedAt = &now
-			}
-			item.RedeemedCount += qty
-			out = result{Balance: balance - total, Item: item, Quantity: qty, Total: total}
-			return nil
-		})
+		id64, err := strconv.ParseUint(c.Param("id"), 10, 64)
 		if err != nil {
+			writeErr(c, service.BizErr(404, "商品不存在"))
+			return
+		}
+		out, err := service.RedeemShopItem(db, uint(id64), body.Quantity)
+		if err != nil {
+			writeErr(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, out)
