@@ -79,10 +79,10 @@
         <div class="up-desc">{{ line.desc }}</div>
       </div>
       <van-button size="small" round type="primary" :disabled="line.maxed" :loading="busy" @click="doUpgrade(line)">
-        {{ line.maxed ? '已满级' : `${line.price} 分` }}
+        {{ line.maxed ? '已满级' : line.priceLabel }}
       </van-button>
     </div>
-    <div class="tip">升级直接扣主积分；种植免费，收获产农场积分，攒满 100 可提现 1 积分</div>
+    <div class="tip">产量A/产量B/周期C 扣主积分；丰收祝福/灾祸减免扣农场积分（对冲关系见道具图鉴）；种植免费，收获产农场积分，攒满 100 可提现 1 积分</div>
   </div>
 </template>
 
@@ -93,10 +93,10 @@ import api from '../api'
 import { primeAudio, playDing } from '../sound'
 
 const farm = ref({
-  coins: 0, total_harvest: 0, level_a: 0, level_b: 0, level_c: 0,
+  coins: 0, total_harvest: 0, level_a: 0, level_b: 0, level_c: 0, level_d: 0, level_e: 0, penalty_coef: 1,
   yield_per_round: 200, period_hours: 8, daily_income_max: 0,
   plots: [], next_plot_index: -1, next_plot_price: 0,
-  upgrade_a: {}, upgrade_b: {}, upgrade_c: {},
+  upgrade_a: {}, upgrade_b: {}, upgrade_c: {}, upgrade_d: {}, upgrade_e: {},
   withdrawable: 0, harvest_now: 0, balance: 0
 })
 const busy = ref(false)
@@ -113,20 +113,33 @@ const upgradeLines = computed(() => {
   const f = farm.value
   return [
     {
-      key: 'A', name: '产量 A', level: f.level_a, price: f.upgrade_a.price, maxed: f.upgrade_a.maxed,
+      key: 'A', name: '产量 A', level: f.level_a, priceLabel: `${f.upgrade_a.price} 分`, maxed: f.upgrade_a.maxed,
       desc: `单田每轮收获 +2%，无副作用。当前单田每轮 ${fmtNum(f.yield_per_round)}`
     },
     {
-      key: 'B', name: '产量 B', level: f.level_b, price: f.upgrade_b.price, maxed: f.upgrade_b.maxed,
+      key: 'B', name: '产量 B', level: f.level_b, priceLabel: `${f.upgrade_b.price} 分`, maxed: f.upgrade_b.maxed,
       desc: `单田每轮收获 +6%，但生长周期 +8%。当前单田每轮 ${fmtNum(f.yield_per_round)} / ${fmtHours(f.period_hours)}`
     },
     {
-      key: 'C', name: '周期 C', level: f.level_c, price: f.upgrade_c.price, maxed: f.upgrade_c.maxed,
+      key: 'C', name: '周期 C', level: f.level_c, priceLabel: `${f.upgrade_c.price} 分`, maxed: f.upgrade_c.maxed,
       desc: `生长周期 -5%，收获来得更快。当前 ${fmtHours(f.period_hours)}`
+    },
+    {
+      key: 'D', name: '丰收祝福', level: f.level_d, priceLabel: fmtK(f.upgrade_d.price), maxed: f.upgrade_d.maxed,
+      desc: `每日结算：昨日收益 ×${10 * f.level_d}% 发额外奖励，但罚分也同步放大。当前罚分系数 ×${f.penalty_coef.toFixed(2)}。扣农场积分`
+    },
+    {
+      key: 'E', name: '灾祸减免', level: f.level_e, priceLabel: fmtK(f.upgrade_e.price), maxed: f.upgrade_e.maxed,
+      desc: `对冲丰收祝福的罚分放大（每级抵 10%，只对冲不独立减罚）。当前罚分系数 ×${f.penalty_coef.toFixed(2)}。扣农场积分`
     }
   ]
 })
 
+function fmtK(n) {
+  const v = (n || 0) / 1000
+  const r = Math.round(v * 10) / 10
+  return (Number.isInteger(r) ? String(r) : r.toFixed(1)) + 'k'
+}
 function fmtNum(n) {
   const v = Math.round((n || 0) * 10) / 10
   return Number.isInteger(v) ? String(v) : v.toFixed(1)

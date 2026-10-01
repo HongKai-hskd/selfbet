@@ -43,8 +43,10 @@
       <div class="result-list">
         <div v-for="(r, i) in openResults" :key="i" class="result-row">
           <span>宝箱 #{{ i + 1 }}</span>
-          <b v-if="r.item" class="gold">{{ r.icon || '🎴' }} {{ r.item }} ×{{ r.qty }}</b>
-          <b v-else class="gold">+{{ r.points }} 分<span v-if="r.bonus" class="bonus-tag">⚡{{ r.bonus }}</span></b>
+          <b class="gold">
+            <template v-if="r.item">{{ r.icon || '🎴' }} {{ r.item }} ×{{ r.qty }} </template>
+            +{{ r.points }} 分<span v-if="r.bonus" class="bonus-tag">⚡{{ r.bonus }}</span>
+          </b>
         </div>
       </div>
       <div class="result-total" v-if="openTotal > 0">共 +{{ openTotal }} 积分</div>

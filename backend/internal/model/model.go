@@ -72,7 +72,7 @@ type Box struct {
 	Name      string `gorm:"not null" json:"name"`
 	MinPoints int    `json:"min_points"`
 	MaxPoints int    `json:"max_points"`
-	ItemDrops []ItemDrop `json:"item_drops" gorm:"serializer:json"` // 动态道具掉落配置；剩余概率=开积分
+	ItemDrops []ItemDrop `json:"item_drops" gorm:"serializer:json"` // 动态道具掉落配置；道具为附加掉落，积分必得（2026-10-01 改并行）
 	// 已废弃：旧的三列固定道具概率，由 ItemDrops 取代（保留列兼容旧库，不再读写业务值）
 	ItemRatePoints int       `json:"item_rate_points"` // % 积分利息卡
 	ItemRateCash   int       `json:"item_rate_cash"`   // % 余额利息卡
@@ -147,13 +147,16 @@ type Ledger struct {
 // 一切消费（买地/升级）直接扣主积分；Coins（农场积分）只进不出——
 // 唯一来源是收获，唯一出口是 100:1 整数提现，纯小数缓冲零钱包。
 type FarmState struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	Coins        float64   `json:"coins"`         // 农场积分余额（允许小数，展示 1 位）
-	LevelA       int       `json:"level_a"`       // 产量A：收获 +2%/级，无副作用
-	LevelB       int       `json:"level_b"`       // 产量B：收获 +6%/级，周期 +8%/级
-	LevelC       int       `json:"level_c"`       // 周期C：周期 −5%/级
-	TotalHarvest int       `json:"total_harvest"` // 累计收获轮次（里程碑展示）
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	Coins         float64   `json:"coins"`           // 农场积分余额（允许小数，展示 1 位）
+	LevelA        int       `json:"level_a"`         // 产量A：收获 +2%/级，无副作用
+	LevelB        int       `json:"level_b"`         // 产量B：收获 +6%/级，周期 +8%/级
+	LevelC        int       `json:"level_c"`         // 周期C：周期 −5%/级
+	LevelD        int       `json:"level_d"`         // 丰收祝福：每日收益加成 +10%/级，罚分同步放大（docs/07 十一）
+	LevelE        int       `json:"level_e"`         // 灾祸减免：对冲 D 的放大（每级抵 10%，只对冲不独立减罚）
+	LastBonusDate string    `json:"last_bonus_date"` // D 线每日奖励幂等键（YYYY-MM-DD）
+	TotalHarvest  int       `json:"total_harvest"`   // 累计收获轮次（里程碑展示）
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // FarmPlot 是一块田（4×6 = 24 块，plot_index 0..23）。种植免费；

@@ -48,7 +48,7 @@
     <van-button block round plain type="primary" icon="plus" class="add-box-btn" @click="openBoxForm()">
       新建宝箱类型
     </van-button>
-    <div class="tip">在任务里关联宝箱并设置掉率；掉落的宝箱进背包，开启时才入账。道具掉落概率之和 ≤ 100，剩余概率开积分（数量 = 开到时一次进背包几张）</div>
+    <div class="tip">在任务里关联宝箱并设置掉率；掉落的宝箱进背包，开启时才入账。道具掉落为附加掉率，开启时积分照得（数量 = 开到时一次进背包几张），各道具概率之和 ≤ 100</div>
 
     <van-popup v-model:show="boxFormShow" round position="bottom" style="padding: 20px 16px 28px">
       <div class="form-title">{{ boxForm.id ? '编辑宝箱' : '新建宝箱' }}</div>
@@ -58,7 +58,7 @@
           <van-field v-model="boxForm.min_points" type="digit" label="最少积分" placeholder="5" :rules="[{ required: true, message: '必填' }]" />
           <van-field v-model="boxForm.max_points" type="digit" label="最多积分" placeholder="50" :rules="[{ required: true, message: '必填' }]" />
           <div class="drops-head">
-            <span>道具掉落（剩余 {{ pointsRate }}% 开积分 {{ boxForm.min_points || 0 }}~{{ boxForm.max_points || 0 }}）</span>
+            <span>道具掉落（附加掉率，积分必得 {{ boxForm.min_points || 0 }}~{{ boxForm.max_points || 0 }}）</span>
             <van-button size="mini" round plain type="primary" :disabled="boxForm.item_drops.length >= itemPool.length" @click="addDropRow">+ 添加</van-button>
           </div>
           <div v-for="(row, idx) in boxForm.item_drops" :key="idx" class="drop-row">
@@ -220,9 +220,6 @@ const dropTypeName = (t) => (itemPool.value.find((d) => d.id === t) || {}).name 
 const dropPickShow = ref(false)
 const dropPickIdx = ref(-1)
 const dropPickColumns = computed(() => itemPool.value.map((d) => ({ text: d.name, value: d.id })))
-
-const dropRateSum = computed(() => boxForm.value.item_drops.reduce((s, r) => s + (parseInt(r.rate) || 0), 0))
-const pointsRate = computed(() => Math.max(0, 100 - dropRateSum.value))
 
 function addDropRow() {
   const used = boxForm.value.item_drops.map((r) => r.item_type)
