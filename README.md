@@ -71,6 +71,18 @@
 
 任务积分、商品价格、惩罚数值、经济换算基准见 `docs/04-积分定价参考.md`。
 
+## 服务器部署
+
+1. 上传 `server-linux-amd64` 与 `backend/config.json`（build.bat 第 4 步产物）
+2. **服务器上的 `config.json`：DSN 主机务必用 `127.0.0.1:3306`**（本机回环连本机 MySQL）
+   - 更快：流量不出服务器，少一次公网绕行
+   - 更稳：日后即使关闭 3306 的对外端口映射，服务器自身完全不受影响
+   - 更安全：数据库端口根本不需要对公网开放
+3. 重启服务进程（systemd / nohup / 手动均可），确认 health 接口 200
+4. 备份：`mysqldump selfbet` 每日一次
+
+> 安全清单：3306 不对公网开放（云安全组限源 IP 或直接关闭外网映射）；数据库用强密码；`config.json` 已被 gitignore，连接信息（含密码）永不进仓库。
+
 ## 代码仓库
 
 https://github.com/HongKai-hskd/selfbet
