@@ -64,16 +64,6 @@ func FarmEEPrice(level int) int {
 	return int(math.Round(farmEBase * math.Pow(farmEStep, float64(level))))
 }
 
-// FarmPenaltyCoef 罚分系数：D 放大、E 对冲（E 只能对冲 D，罚分下限 = 基础值 ×1）。
-// docs/07 十一：coef = 1 + 0.1 × max(0, D − E)。
-func FarmPenaltyCoef(dLv, eLv int) float64 {
-	gap := dLv - eLv
-	if gap < 0 {
-		gap = 0
-	}
-	return 1 + 0.1*float64(gap)
-}
-
 // FarmPlotPrice 第 n 块地契价（n = plotIndex+1，n≥2）。
 func FarmPlotPrice(plotIndex int) int {
 	return farmPlotBase + farmPlotStep*(plotIndex-1) // n-2 = plotIndex-1
@@ -176,7 +166,6 @@ func GetFarmView(db *gorm.DB) (map[string]any, error) {
 		"level_c":          s.LevelC,
 		"level_d":          s.LevelD,
 		"level_e":          s.LevelE,
-		"penalty_coef":     FarmPenaltyCoef(s.LevelD, s.LevelE),
 		"yield_per_round":  yield,
 		"period_hours":     periodH,
 		"daily_income_max": yield * float64(farmDailyMax) * math.Max(1, float64(countUnlocked(db))),
@@ -441,12 +430,17 @@ func WithdrawFarm(db *gorm.DB) (*WithdrawResult, error) {
 	return &out, nil
 }
 
-// SettleDailyBonus D 线丰收祝福：昨日正收益（tasks+boxes 正流水，提现不算）
-// × 10%×D_Lv 发额外奖励。每天一次（幂等键 = 昨日日期，存 farm_states.last_bonus_date）。
-// 挂在 SettlePenalties 末尾同一触发点。
+// SettleDailyBonus D 线丰收祝福（docs/07 十一 v3 净值带符号模型）：
+// 昨日净值 N = task+box 收入 − penalty 罚分（提现/商城/道具不计，与统计净值口径一致）。
+//   - N > 0：奖励 = N × 10%×D_Lv（type=farm_bonus 正行）——净赚才发
+//   - N < 0：放大 = N × 10%×max(0, D−E)（type=farm_penalty 负行）——净亏放大亏损，E 对冲
+//   - N = 0 或无需发放：只写幂等标记
+//
+// 每天一次（last_bonus_date 幂等键）；行 created_at 回溯昨日 23:59:59（归属昨天，
+// 与罚分行的追溯口径一致）。挂在 SettlePenalties 末尾同一触发点。
 func SettleDailyBonus(db *gorm.DB, now time.Time) {
 	var fs model.FarmState
-	if err := db.Take(&fs).Error; err != nil || fs.LevelD <= 0 {
+	if err := db.Take(&fs).Error; err != nil || (fs.LevelD <= 0 && fs.LevelE <= 0) {
 		return
 	}
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
@@ -455,6 +449,7 @@ func SettleDailyBonus(db *gorm.DB, now time.Time) {
 	if fs.LastBonusDate == yKey {
 		return // 今天已结过昨天的奖励
 	}
+	chargeAt := yesterdayStart.Add(24*time.Hour - time.Second) // 归属昨天最后一刻
 	db.Transaction(func(tx *gorm.DB) error {
 		var fresh model.FarmState
 		if err := tx.Take(&fresh).Error; err != nil {
@@ -463,21 +458,52 @@ func SettleDailyBonus(db *gorm.DB, now time.Time) {
 		if fresh.LastBonusDate == yKey {
 			return nil // 并发下已被结算
 		}
-		var p int
+		mark := func() error {
+			return tx.Model(&model.FarmState{}).Where("id = ?", fresh.ID).
+				Update("last_bonus_date", yKey).Error
+		}
+		var net int
 		tx.Model(&model.Ledger{}).
-			Where("type IN ? AND amount > 0 AND created_at >= ? AND created_at < ?",
-				[]string{"task", "box"}, yesterdayStart, todayStart).
-			Select("COALESCE(SUM(amount),0) AS amount").Scan(&p)
-		bonus := int(math.Round(float64(p) * 0.1 * float64(fresh.LevelD)))
-		if bonus > 0 {
+			Where("type IN ? AND created_at >= ? AND created_at < ?",
+				[]string{"task", "box", "penalty"}, yesterdayStart, todayStart).
+			Select("COALESCE(SUM(amount),0) AS amount").Scan(&net)
+		if net == 0 {
+			return mark()
+		}
+		if net > 0 {
+			// 净赚：发奖励（E 不参与——它只对冲亏损放大）
+			if fresh.LevelD <= 0 {
+				return mark()
+			}
+			amount := int(math.Round(float64(net) * 0.1 * float64(fresh.LevelD)))
+			if amount <= 0 {
+				return mark()
+			}
 			if err := tx.Create(&model.Ledger{
-				Type: "farm_bonus", Amount: bonus,
-				Note: fmt.Sprintf("丰收祝福 Lv%d 昨日收益加成（%d×%d%%）", fresh.LevelD, p, 10*fresh.LevelD),
+				Type: "farm_bonus", Amount: amount,
+				Note:      fmt.Sprintf("丰收祝福 Lv%d 昨日净收益加成（%d×%d%%）", fresh.LevelD, net, 10*fresh.LevelD),
+				CreatedAt: chargeAt,
 			}).Error; err != nil {
 				return err
 			}
+			return mark()
 		}
-		return tx.Model(&model.FarmState{}).Where("id = ?", fresh.ID).
-			Update("last_bonus_date", yKey).Error
+		// 净亏：放大亏损（E 对冲后仍有放大才发）
+		gap := fresh.LevelD - fresh.LevelE
+		if gap <= 0 {
+			return mark()
+		}
+		amount := int(math.Round(float64(net) * 0.1 * float64(gap)))
+		if amount >= 0 {
+			return mark()
+		}
+		if err := tx.Create(&model.Ledger{
+			Type: "farm_penalty", Amount: amount,
+			Note:      fmt.Sprintf("丰收祝福 Lv%d 昨日净亏损放大（净 %d × −%d%%）", fresh.LevelD, net, 10*gap),
+			CreatedAt: chargeAt,
+		}).Error; err != nil {
+			return err
+		}
+		return mark()
 	})
 }

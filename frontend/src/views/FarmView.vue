@@ -93,7 +93,7 @@ import api from '../api'
 import { primeAudio, playDing } from '../sound'
 
 const farm = ref({
-  coins: 0, total_harvest: 0, level_a: 0, level_b: 0, level_c: 0, level_d: 0, level_e: 0, penalty_coef: 1,
+  coins: 0, total_harvest: 0, level_a: 0, level_b: 0, level_c: 0, level_d: 0, level_e: 0,
   yield_per_round: 200, period_hours: 8, daily_income_max: 0,
   plots: [], next_plot_index: -1, next_plot_price: 0,
   upgrade_a: {}, upgrade_b: {}, upgrade_c: {}, upgrade_d: {}, upgrade_e: {},
@@ -113,24 +113,24 @@ const upgradeLines = computed(() => {
   const f = farm.value
   return [
     {
-      key: 'A', name: '产量 A', level: f.level_a, priceLabel: `${f.upgrade_a.price} 分`, maxed: f.upgrade_a.maxed,
+      key: 'A', name: '产量 A', level: f.level_a, price: f.upgrade_a.price, currency: '积分', priceLabel: `${f.upgrade_a.price} 分`, maxed: f.upgrade_a.maxed,
       desc: `单田每轮收获 +2%，无副作用。当前单田每轮 ${fmtNum(f.yield_per_round)}`
     },
     {
-      key: 'B', name: '产量 B', level: f.level_b, priceLabel: `${f.upgrade_b.price} 分`, maxed: f.upgrade_b.maxed,
+      key: 'B', name: '产量 B', level: f.level_b, price: f.upgrade_b.price, currency: '积分', priceLabel: `${f.upgrade_b.price} 分`, maxed: f.upgrade_b.maxed,
       desc: `单田每轮收获 +6%，但生长周期 +8%。当前单田每轮 ${fmtNum(f.yield_per_round)} / ${fmtHours(f.period_hours)}`
     },
     {
-      key: 'C', name: '周期 C', level: f.level_c, priceLabel: `${f.upgrade_c.price} 分`, maxed: f.upgrade_c.maxed,
+      key: 'C', name: '周期 C', level: f.level_c, price: f.upgrade_c.price, currency: '积分', priceLabel: `${f.upgrade_c.price} 分`, maxed: f.upgrade_c.maxed,
       desc: `生长周期 -5%，收获来得更快。当前 ${fmtHours(f.period_hours)}`
     },
     {
-      key: 'D', name: '丰收祝福', level: f.level_d, priceLabel: fmtK(f.upgrade_d.price) + ' 分', maxed: f.upgrade_d.maxed, color: '#10b981',
-      desc: `每日结算：昨日收益 ×${10 * f.level_d}% 发额外奖励，但罚分也同步放大。当前罚分系数 ×${f.penalty_coef.toFixed(2)}。扣农场积分`
+      key: 'D', name: '丰收祝福', level: f.level_d, price: f.upgrade_d.price, currency: '农场积分', priceLabel: fmtK(f.upgrade_d.price) + ' 分', maxed: f.upgrade_d.maxed, color: '#10b981',
+      desc: `每日结算：昨日净收益 ×${10 * f.level_d}%——净赚发奖励，净亏放大亏损（灾祸减免可对冲）。扣农场积分`
     },
     {
-      key: 'E', name: '灾祸减免', level: f.level_e, priceLabel: fmtK(f.upgrade_e.price) + ' 分', maxed: f.upgrade_e.maxed, color: '#10b981',
-      desc: `对冲丰收祝福的罚分放大（每级抵 10%，只对冲不独立减罚）。当前罚分系数 ×${f.penalty_coef.toFixed(2)}。扣农场积分`
+      key: 'E', name: '灾祸减免', level: f.level_e, price: f.upgrade_e.price, currency: '农场积分', priceLabel: fmtK(f.upgrade_e.price) + ' 分', maxed: f.upgrade_e.maxed, color: '#10b981',
+      desc: `每级抵消 10% 的净亏损放大（只对冲，不能独立减罚）。扣农场积分`
     }
   ]
 })
@@ -229,8 +229,15 @@ async function doUpgrade(line) {
     msg = `单格收获 ${fmtNum(f.yield_per_round)} → ${fmtNum(baseY * (1 + 0.06 * (f.level_b + 1)))}，周期 ${fmtHours(f.period_hours)} → ${fmtHours(f.period_hours + 0.64)}`
   }
   if (line.key === 'C') msg = `周期 ${fmtHours(f.period_hours)} → ${fmtHours(Math.max(1, f.period_hours - 0.4))}`
+  if (line.key === 'D') {
+    msg = `昨日净收益加成 +10% → +${10 * (f.level_d + 1)}%（净赚发奖励，净亏同倍放大亏损）`
+  }
+  if (line.key === 'E') {
+    const remain = 10 * Math.max(0, f.level_d - f.level_e - 1)
+    msg = `对冲净亏损放大 10% → 剩余放大 ${remain}%（只对冲，不独立减罚）`
+  }
   try {
-    await showConfirmDialog({ title: `${line.name} Lv${line.level + 1}`, message: `${msg}\n\n花费 ${line.price} 积分？` })
+    await showConfirmDialog({ title: `${line.name} Lv${line.level + 1}`, message: `${msg}\n\n花费 ${line.price} ${line.currency}？` })
   } catch (e) {
     return
   }

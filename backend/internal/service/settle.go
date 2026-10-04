@@ -1,7 +1,6 @@
 package service
 
 import (
-	"math"
 	"strconv"
 	"time"
 
@@ -60,12 +59,6 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 			}
 		}
 	}
-
-	// D/E 农场升级线（docs/07 十一）：罚分系数——D 放大、E 对冲，
-	// 下限 = 基础值 ×1（E 只能对冲 D，永不把罚分减到基础值以下）
-	var fs model.FarmState
-	db.Take(&fs) // 无状态行按零值处理（未升农场 = 无加成无减免）
-	coef := FarmPenaltyCoef(fs.LevelD, fs.LevelE)
 
 	for i := range tasks {
 		t := &tasks[i]
@@ -127,17 +120,16 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 				return nil
 			}
 			// 余额地板：积分最多透支到 PointsFloor，超出部分减免
-			// （应罚先过 D/E 系数：full = 放大后的应罚）
+			// （D/E 的收益放大/对冲在每日净值结算层统一处理，见 SettleDailyBonus）
 			bal := PointBalance(tx)
-			full := int(math.Round(float64(t.Penalty) * coef))
-			pts := -full
+			pts := -t.Penalty
 			noteSuffix := ""
 			if bal+pts < model.PointsFloor {
 				pts = model.PointsFloor - bal
 				if pts >= 0 {
 					return nil // 已在地板上，本周期免扣（结算标记已记）
 				}
-				noteSuffix = "（触及 " + strconv.Itoa(model.PointsFloor) + " 下限，减免 " + strconv.Itoa(full+pts) + " 分）"
+				noteSuffix = "（触及 " + strconv.Itoa(model.PointsFloor) + " 下限，减免 " + strconv.Itoa(t.Penalty+pts) + " 分）"
 			}
 			return tx.Create(&model.Ledger{
 				Type: "penalty", Amount: pts, RefID: t.ID, Note: note + noteSuffix, CreatedAt: chargeAt,
