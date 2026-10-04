@@ -365,7 +365,11 @@ func CompleteTask(db *gorm.DB) gin.HandlerFunc {
 			writeErr(c, service.BizErr(404, "任务不存在"))
 			return
 		}
-		out, err := service.CompleteTask(db, uint(id64), time.Now())
+		var body struct {
+			Count int `json:"count"`
+		}
+		_ = c.ShouldBindJSON(&body) // count 可选；空 body 时 0 → service 内钳为 1
+		out, err := service.CompleteTask(db, uint(id64), time.Now(), body.Count)
 		if err != nil {
 			writeErr(c, err)
 			return

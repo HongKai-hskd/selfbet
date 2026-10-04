@@ -55,7 +55,12 @@
               v-if="t.status !== 'doing' && t.repeat === 'once'" size="small" plain type="primary" round
               @click="start(t)"
             >开始</van-button>
-            <van-button size="small" type="primary" round :loading="completingId === t.id" @click="complete(t)">
+            <van-button
+              size="small" type="primary" round :loading="completingId === t.id"
+              @click="completeClick(t)"
+              @touchstart.passive="pressStart(t)" @touchend="pressEnd(t)" @touchmove.passive="pressCancel"
+              @mousedown="pressStart(t)" @mouseup="pressEnd(t)" @mouseleave="pressCancel"
+            >
               完成
             </van-button>
           </template>
@@ -69,8 +74,20 @@
       <van-empty v-if="!filtered.length" description="还没有任务，点右下角 + 新建" />
     </div>
     <div class="drag-tip" v-if="filter !== 2 && filtered.length > 1">按住 ☰ 上下拖动可调整顺序</div>
+    <div class="drag-tip" v-if="hasMultiRound">多轮任务长按「完成」可批量领取</div>
 
     <div class="fab" @click="openForm()">+</div>
+
+    <!-- 批量完成 -->
+    <van-popup v-model:show="batchShow" round position="bottom" style="padding: 20px 16px 28px">
+      <div class="form-title">批量完成「{{ batchTask?.title }}」</div>
+      <div class="batch-row">
+        <span>完成轮数</span>
+        <van-stepper v-model="batchCount" min="1" max="50" integer />
+      </div>
+      <div class="batch-hint">每轮 {{ batchTask?.points }} 分秒到账，宝箱逐轮独立掉落（第 {{ (batchTask?.rounds_today || 0) + 1 }} 轮起）</div>
+      <van-button round block type="primary" @click="confirmBatch">完成 {{ batchCount }} 轮</van-button>
+    </van-popup>
 
     <!-- 新建/编辑任务 -->
     <van-popup v-model:show="formShow" round position="bottom" style="padding: 20px 16px 28px">
@@ -211,6 +228,8 @@ const form = ref({ ...emptyForm })
 
 const statusMap = { doing: 0, pending: 1, done: 2 }
 const filtered = computed(() => {
+
+const hasMultiRound = computed(() => tasks.value.some((t) => t.multi_round && t.status !== 'done'))
   const list = tasks.value.filter((t) => {
     if (filter.value === 0 ? t.status !== 'doing' : statusMap[t.status] !== filter.value) return false
     if (filterGroup.value === '__all__') return true
@@ -593,10 +612,60 @@ async function complete(t) {
   } catch (e) {
     return
   }
+  await doComplete(t.id, 1)
+}
+
+// 长按「完成」= 批量领取：500ms 触发弹窗，随后的 click 用 pressFired 守卫吞掉
+let pressTimer = null
+const pressFired = ref(false)
+
+function pressStart(t) {
+  if (completingId.value === t.id) return
+  pressFired.value = false
+  pressTimer = setTimeout(() => {
+    pressFired.value = true
+    openBatch(t)
+  }, 500)
+}
+function pressEnd() {
+  if (pressTimer) {
+    clearTimeout(pressTimer)
+    pressTimer = null
+  }
+}
+function pressCancel() {
+  pressEnd()
+}
+function completeClick(t) {
+  if (pressFired.value) {
+    pressFired.value = false // 长按已处理，吞掉这次 click
+    return
+  }
+  complete(t)
+}
+
+const batchShow = ref(false)
+const batchTask = ref(null)
+const batchCount = ref(5)
+
+function openBatch(t) {
+  batchTask.value = t
+  batchCount.value = 5
+  batchShow.value = true
+}
+
+async function confirmBatch() {
+  const t = batchTask.value
+  if (!t) return
+  batchShow.value = false
+  await doComplete(t.id, batchCount.value)
+}
+
+async function doComplete(id, count) {
   primeAudio() // iOS 音效解锁要在用户手势链内
-  completingId.value = t.id
+  completingId.value = id
   try {
-    const res = await api.post(`/tasks/${t.id}/complete`)
+    const res = await api.post(`/tasks/${id}/complete`, { count })
     rewardResult.value = res
     load()
   } catch (e) {
@@ -729,4 +798,9 @@ function fmtTime(s) {
 }
 .form-title { text-align: center; font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #323233; }
 .pts-hint { color: #969799; font-size: 12px; }
+</style>
+
+<style>
+.batch-row { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 8px; }
+.batch-hint { font-size: 12px; color: #969799; margin-bottom: 16px; }
 </style>

@@ -13,7 +13,7 @@ func TestCompleteTaskPaysAndConsumesDoubleCard(t *testing.T) {
 	db.Create(&task)
 	db.Create(&model.PendingEffect{Kind: pendingDouble})
 
-	res, err := CompleteTask(db, task.ID, time.Now())
+	res, err := CompleteTask(db, task.ID, time.Now(), 1)
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestCompleteTaskPaysAndConsumesDoubleCard(t *testing.T) {
 		t.Fatal("double card should be consumed")
 	}
 	// 重复完成被拒
-	if _, err := CompleteTask(db, task.ID, time.Now()); err == nil {
+	if _, err := CompleteTask(db, task.ID, time.Now(), 1); err == nil {
 		t.Fatal("second complete should be rejected")
 	}
 }
@@ -38,17 +38,17 @@ func TestCompleteTaskDailyOncePerPeriod(t *testing.T) {
 	db := newTestDB(t)
 	task := model.Task{Title: "早睡", Points: 5, Repeat: "daily", Status: "pending"}
 	db.Create(&task)
-	if _, err := CompleteTask(db, task.ID, time.Now()); err != nil {
+	if _, err := CompleteTask(db, task.ID, time.Now(), 1); err != nil {
 		t.Fatalf("first complete: %v", err)
 	}
-	if _, err := CompleteTask(db, task.ID, time.Now()); err == nil {
+	if _, err := CompleteTask(db, task.ID, time.Now(), 1); err == nil {
 		t.Fatal("same-period second complete should be rejected")
 	}
 	// multi-round：同周期可重复领取
 	mr := model.Task{Title: "喝水", Points: 2, Repeat: "daily", MultiRound: true, Status: "pending"}
 	db.Create(&mr)
 	for i := 0; i < 3; i++ {
-		if _, err := CompleteTask(db, mr.ID, time.Now()); err != nil {
+		if _, err := CompleteTask(db, mr.ID, time.Now(), 1); err != nil {
 			t.Fatalf("multi-round round %d: %v", i+1, err)
 		}
 	}
@@ -103,7 +103,7 @@ func TestUndoLedgerRecallsBackpack(t *testing.T) {
 	boxID := box.ID
 	task := model.Task{Title: "刷题", Points: 10, Status: "pending", BoxID: &boxID, BoxDropRate: 100}
 	db.Create(&task)
-	res, err := CompleteTask(db, task.ID, time.Now())
+	res, err := CompleteTask(db, task.ID, time.Now(), 1)
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestUndoLedgerRecallsBackpack(t *testing.T) {
 		t.Fatalf("status after undo = %q, want doing", after.Status)
 	}
 	// 撤回后可以重新完成（宝箱再掉一次）
-	res2, err := CompleteTask(db, task.ID, time.Now())
+	res2, err := CompleteTask(db, task.ID, time.Now(), 1)
 	if err != nil {
 		t.Fatalf("re-complete after undo: %v", err)
 	}
