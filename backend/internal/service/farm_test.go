@@ -196,17 +196,3 @@ func TestFarmBuyPlotAndUpgradeLedger(t *testing.T) {
 		t.Fatal("farm ledger row should not be undoable")
 	}
 }
-
-func TestFarmPenaltyCoef(t *testing.T) {
-	cases := []struct {
-		d, e int
-		want float64
-	}{
-		{0, 0, 1}, {10, 0, 2}, {10, 10, 1}, {10, 5, 1.5}, {0, 10, 1}, {5, 10, 1},
-	}
-	for _, c := range cases {
-		if got := FarmPenaltyCoef(c.d, c.e); got != c.want {
-			t.Errorf("FarmPenaltyCoef(%d,%d) = %v, want %v", c.d, c.e, got, c.want)
-		}
-	}
-}

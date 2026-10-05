@@ -118,6 +118,7 @@ type ShopItem struct {
 	SortOrder      int        `gorm:"index" json:"sort_order"`
 	CooldownDays   int        `json:"cooldown_days"`
 	LastRedeemedAt *time.Time `json:"last_redeemed_at"`
+	IsReward       bool       `json:"is_reward"` // 奖励型商品：无冷却奖励的计时对象（docs/02 2026-10-05 决议）
 	CreatedAt      time.Time  `json:"created_at"`
 }
 

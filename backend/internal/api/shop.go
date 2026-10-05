@@ -44,6 +44,7 @@ type shopBody struct {
 	Description  string `json:"description"`
 	TagID        *uint  `json:"tag_id"`
 	CooldownDays int    `json:"cooldown_days"`
+	IsReward     bool   `json:"is_reward"`
 }
 
 func (b *shopBody) validate() string {
@@ -67,7 +68,7 @@ func CreateShopItem(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
-		item := model.ShopItem{Name: body.Name, Price: body.Price, Description: body.Description, TagID: body.TagID, CooldownDays: body.CooldownDays}
+		item := model.ShopItem{Name: body.Name, Price: body.Price, Description: body.Description, TagID: body.TagID, CooldownDays: body.CooldownDays, IsReward: body.IsReward}
 		if err := db.Create(&item).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -93,7 +94,7 @@ func UpdateShopItem(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		item.Name, item.Price, item.Description = body.Name, body.Price, body.Description
-		item.TagID, item.CooldownDays = body.TagID, body.CooldownDays
+		item.TagID, item.CooldownDays, item.IsReward = body.TagID, body.CooldownDays, body.IsReward
 		if err := db.Save(&item).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

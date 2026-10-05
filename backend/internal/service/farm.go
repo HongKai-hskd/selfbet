@@ -463,9 +463,11 @@ func SettleDailyBonus(db *gorm.DB, now time.Time) {
 				Update("last_bonus_date", yKey).Error
 		}
 		var net int
+		// 连锁放大：基数包含此前结算项（全勤奖/无冷却奖）写入的行——
+		// 结算顺序里排在前面的项，其产出会被丰收祝福按倍率放大
 		tx.Model(&model.Ledger{}).
 			Where("type IN ? AND created_at >= ? AND created_at < ?",
-				[]string{"task", "box", "penalty"}, yesterdayStart, todayStart).
+				[]string{"task", "box", "penalty", "perfect_day", "cooldown_reward"}, yesterdayStart, todayStart).
 			Select("COALESCE(SUM(amount),0) AS amount").Scan(&net)
 		if net == 0 {
 			return mark()

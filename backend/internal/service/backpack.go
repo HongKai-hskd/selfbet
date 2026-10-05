@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"math/rand"
 	"strconv"
 	"time"
@@ -57,31 +58,34 @@ func OpenBoxes(db *gorm.DB, typeID uint, count int) ([]OpenBoxResult, int, error
 			if del.RowsAffected == 0 {
 				continue
 			}
-			// 道具判定：累积概率落点。道具是「附加掉落」——开到照发进背包，
-			// 积分并行结算不互斥（2026-10-01 用户拍板，此前道具命中顶掉积分）
-			roll := rand.Intn(100) // 0..99
-			acc := 0
-			itemType, qty := 0, 0
+			// 道具判定：每个配置的道具「独立掷骰」——概率互相独立，运气好
+			// 一箱同出多个（2026-10-04 用户拍板：独立判定，不再互斥）。
+			// 道具是「附加掉落」，积分照旧必得
+			res := OpenBoxResult{}
+			totalItems := 0
+			names := []string{}
+			icon := ""
 			for _, d := range box.ItemDrops {
 				if d.Rate <= 0 {
 					continue
 				}
-				acc += d.Rate
-				if roll < acc {
-					itemType, qty = d.ItemType, d.Qty
-					break
+				if rand.Intn(100) < d.Rate { // 各自独立判定
+					for i := 0; i < d.Qty; i++ {
+						if err := tx.Create(&model.BackpackItem{Kind: "item", TypeID: uint(d.ItemType), Source: r.ID}).Error; err != nil {
+							return err
+						}
+					}
+					names = append(names, ItemName(uint(d.ItemType)))
+					if icon == "" {
+						icon = itemDefByID[uint(d.ItemType)].Icon
+					}
+					totalItems += d.Qty
 				}
 			}
-			res := OpenBoxResult{}
-			if itemType > 0 {
-				for i := 0; i < qty; i++ {
-					if err := tx.Create(&model.BackpackItem{Kind: "item", TypeID: uint(itemType), Source: r.ID}).Error; err != nil {
-						return err
-					}
-				}
-				res.Item = ItemName(uint(itemType))
-				res.Icon = itemDefByID[uint(itemType)].Icon
-				res.Qty = qty
+			if len(names) > 0 {
+				res.Item = strings.Join(names, "、")
+				res.Icon = icon
+				res.Qty = totalItems
 			}
 			// 积分结算（必得）：运势卡（区间×2）与幸运符（积分×2）只吃
 			// 第一个开出的箱子（含附道具的箱子），可叠加

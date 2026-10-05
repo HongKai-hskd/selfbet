@@ -77,6 +77,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		authed.PUT("/shop/:id", UpdateShopItem(db))
 		authed.DELETE("/shop/:id", DeleteShopItem(db))
 		authed.POST("/shop/reorder", ReorderShop(db))
+		authed.GET("/settle-settings", GetSettleSettings(db))
+		authed.PUT("/settle-settings", UpdateSettleSettings(db))
 		authed.POST("/shop/:id/redeem", RedeemShopItem(db))
 
 		authed.GET("/farm", GetFarm(db))

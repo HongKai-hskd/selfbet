@@ -186,7 +186,7 @@ func applyBody(t *model.Task, b *taskBody) {
 
 func ListTasks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		service.SettlePenalties(db, time.Now())
+		service.SettleAll(db, time.Now())
 		tasks := []model.Task{}
 		q := db.Order("created_at DESC")
 		if s := c.Query("status"); s != "" {

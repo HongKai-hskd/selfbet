@@ -135,41 +135,17 @@ func CompleteTask(db *gorm.DB, taskID uint, now time.Time, count int) (*Complete
 				return err
 			}
 			totalEarned += earned
-			// box drop roll: the box goes to the backpack unopened — what it
-			// contains is decided when the user opens it. Item rates roll via
-			// the box's ItemDrops (cumulative hit, remainder = plain points
-			// box), same rule as backpack opening. 批量完成时每轮独立掉落。
+			// box drop roll（方案 A，2026-10-04 拍板）：掉率命中 → 宝箱本体进
+			// 背包；内容物——积分必得 + 道具独立判定——全部留给开箱时结算。
+			// 任务时不再做道具替换（职责单一：掉的是箱子，开箱才开盲盒）
 			if task.BoxID != nil && task.BoxDropRate > 0 && rand.Intn(100) < task.BoxDropRate {
 				var box model.Box
 				if err := tx.First(&box, *task.BoxID).Error; err == nil {
-					roll := rand.Intn(100)
-					itemType, qty := 0, 1
-					acc := 0
-					for _, d := range box.ItemDrops {
-						if d.Rate <= 0 {
-							continue
-						}
-						acc += d.Rate
-						if roll < acc {
-							itemType, qty = d.ItemType, d.Qty
-							break
-						}
-					}
-					kind, typeID, name := "box", box.ID, box.Name
-					if itemType > 0 {
-						kind, typeID, name = "item", uint(itemType), ItemName(uint(itemType))
-					}
-					n := 1
-					if itemType > 0 {
-						n = qty
-					}
-					for i := 0; i < n; i++ {
-						if err := tx.Create(&model.BackpackItem{Kind: kind, TypeID: typeID, Source: lrow.ID}).Error; err != nil {
-							return err
-						}
+					if err := tx.Create(&model.BackpackItem{Kind: "box", TypeID: box.ID, Source: lrow.ID}).Error; err != nil {
+						return err
 					}
 					boxCount++
-					lastBox = &BoxResult{Name: name, Count: 1, Item: itemType > 0, Qty: qty}
+					lastBox = &BoxResult{Name: box.Name, Count: 1, Item: false, Qty: 1}
 				}
 			}
 		}

@@ -29,6 +29,12 @@
       <div class="be-sub">种田赚农场积分，100 = 1 积分</div>
       <van-icon name="arrow" class="be-arrow" />
     </div>
+    <div class="backpack-entry" @click="$router.push('/settle-settings')">
+      <div class="be-icon">⚙️</div>
+      <div class="be-name">结算设置</div>
+      <div class="be-sub">全勤奖 / 无冷却奖励 / 结算顺序</div>
+      <van-icon name="arrow" class="be-arrow" />
+    </div>
 
     <div class="section-title">宝箱管理</div>
     <div class="box-list">

@@ -14,6 +14,7 @@
         <div class="shop-main">
           <div class="shop-name">
             {{ item.name }}
+            <span v-if="item.is_reward" class="cd-chip" style="color:#10b981">⭐ 奖励型</span>
             <span v-if="item.cooldown_days > 0" class="cd-chip">🔥 {{ item.cooldown_days }} 天冷却</span>
           </div>
           <div v-if="item.description" class="shop-desc">{{ item.description }}</div>
@@ -83,6 +84,12 @@
           <van-field v-model="form.price" type="digit" label="所需积分" placeholder="500" :rules="[{ required: true, message: '请填价格' }]" />
           <van-field v-model="form.description" label="说明" placeholder="备注（可空）" />
           <van-field v-model="form.cooldown_days" type="digit" label="冷却天数" placeholder="0（买后 N 天内不能再兑）" />
+          <van-field label="奖励型商品" label-width="90">
+            <template #input>
+              <van-switch v-model="form.is_reward" size="22" />
+            </template>
+          </van-field>
+          <div style="font-size:12px;color:#969799;padding:0 16px;">标记后参与「无冷却奖励」：冷却结束每天按可用天数梯度发奖励</div>
         </van-cell-group>
         <div style="margin: 16px 16px 0">
           <van-button round block type="primary" native-type="submit">保存</van-button>
@@ -133,7 +140,7 @@ const redeemQty = ref(1)
 const listEl = ref(null)
 let sortable = null
 
-const emptyForm = { id: null, name: '', price: '', description: '', cooldown_days: '' }
+const emptyForm = { id: null, name: '', price: '', description: '', cooldown_days: '', is_reward: false }
 const form = ref({ ...emptyForm })
 
 const maxQty = computed(() =>
@@ -217,14 +224,14 @@ onMounted(load)
 
 function openForm(item) {
   form.value = item
-    ? { id: item.id, name: item.name, price: String(item.price), description: item.description, cooldown_days: item.cooldown_days ? String(item.cooldown_days) : '' }
+    ? { id: item.id, name: item.name, price: String(item.price), description: item.description, cooldown_days: item.cooldown_days ? String(item.cooldown_days) : '', is_reward: !!item.is_reward }
     : { ...emptyForm }
   formShow.value = true
 }
 
 async function save() {
   const f = form.value
-  const body = { name: f.name, price: parseInt(f.price) || 0, description: f.description, cooldown_days: parseInt(f.cooldown_days) || 0 }
+  const body = { name: f.name, price: parseInt(f.price) || 0, description: f.description, cooldown_days: parseInt(f.cooldown_days) || 0, is_reward: !!f.is_reward }
   try {
     if (f.id) await api.put(`/shop/${f.id}`, body)
     else await api.post('/shop', body)

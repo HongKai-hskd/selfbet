@@ -1,6 +1,8 @@
 package service
 
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -136,7 +138,215 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 			}).Error
 		})
 	}
+}
 
-	// D 线丰收祝福：昨日正收益加成（同为惰性、每日一次、幂等）
-	SettleDailyBonus(db, now)
+
+// ---- 每日结算编排（docs/02 2026-10-05 决议）----
+//
+// 打开 App 时按「结算顺序」依次执行：罚分固定最前（顺序 0，不可调），
+// 三个奖励类结算项按设置拖拽出的顺序跑——先结算项写入的流水会成为
+// 后结算项（丰收祝福）的基数，形成连锁放大。所有行回溯昨日 23:59:59。
+
+const (
+	SettleKeyPerfectDay     = "perfect_day"     // 全勤奖
+	SettleKeyCooldownReward = "cooldown_reward" // 无冷却奖励
+	SettleKeyFarmBoost      = "farm_boost"      // 丰收祝福（压轴）
+)
+
+func defaultSettleOrder() []string {
+	return []string{SettleKeyPerfectDay, SettleKeyCooldownReward, SettleKeyFarmBoost}
+}
+
+// SettlementOrder 读取结算顺序设置（缺省/损坏时回默认并补全缺失项）。
+func SettlementOrder(db *gorm.DB) []string {
+	def := defaultSettleOrder()
+	var s model.Settings
+	if err := db.Where("setting_key = ?", "settle_order").First(&s).Error; err != nil {
+		return def
+	}
+	var order []string
+	if err := json.Unmarshal([]byte(s.Value), &order); err != nil {
+		return def
+	}
+	valid := map[string]bool{SettleKeyPerfectDay: true, SettleKeyCooldownReward: true, SettleKeyFarmBoost: true}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, k := range order {
+		if valid[k] && !seen[k] {
+			out = append(out, k)
+			seen[k] = true
+		}
+	}
+	for _, k := range def {
+		if !seen[k] {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// SettleAll 惰性结算总入口（替代散落的 SettlePenalties 直调）。
+func SettleAll(db *gorm.DB, now time.Time) {
+	SettlePenalties(db, now) // 顺序 0 固定最前：昨日账的基础，其余项依赖它
+	for _, key := range SettlementOrder(db) {
+		switch key {
+		case SettleKeyPerfectDay:
+			SettlePerfectDay(db, now)
+		case SettleKeyCooldownReward:
+			SettleCooldownReward(db, now)
+		case SettleKeyFarmBoost:
+			SettleDailyBonus(db, now)
+		}
+	}
+}
+
+// SettlePerfectDay 全勤奖：昨日「零罚分行 + 有产出」→ 发固定金额（设置可改）。
+// 判定口径：免罚金牌的 0 分审计行不算扣分；昨日至少一条 task/box 收入流水
+// （防连续缺勤白拿——防 burnout 规则只补罚最近一天，中间天流水干净但不发全勤）。
+func SettlePerfectDay(db *gorm.DB, now time.Time) {
+	amount := PerfectDayAmount(db)
+	if amount <= 0 {
+		return
+	}
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterdayStart := todayStart.AddDate(0, 0, -1)
+	yKey := yesterdayStart.Format("2006-01-02")
+	db.Transaction(func(tx *gorm.DB) error {
+		var s model.Settings
+		if err := tx.Where("setting_key = ?", "perfect_day_date").First(&s).Error; err == nil && s.Value == yKey {
+			return nil // 今天已结过昨天的全勤
+		}
+		var penaltyCount int64
+		tx.Model(&model.Ledger{}).
+			Where("type = ? AND amount <> 0 AND created_at >= ? AND created_at < ?", "penalty", yesterdayStart, todayStart).
+			Count(&penaltyCount) // 0 分审计行（免罚金牌）不算扣分
+		var incomeCount int64
+		tx.Model(&model.Ledger{}).
+			Where("type IN ? AND amount > 0 AND created_at >= ? AND created_at < ?",
+				[]string{"task", "box"}, yesterdayStart, todayStart).
+			Count(&incomeCount)
+		if penaltyCount > 0 || incomeCount == 0 {
+			// 不满足全勤：只写幂等标记
+			return upsertSetting(tx, "perfect_day_date", yKey)
+		}
+		chargeAt := yesterdayStart.Add(24*time.Hour - time.Second)
+		if err := tx.Create(&model.Ledger{
+			Type: "perfect_day", Amount: amount,
+			Note:      fmt.Sprintf("全勤奖：昨日零罚分（产出 %d 分流水）", incomeCount),
+			CreatedAt: chargeAt,
+		}).Error; err != nil {
+			return err
+		}
+		return upsertSetting(tx, "perfect_day_date", yKey)
+	})
+}
+
+// SettleCooldownReward 无冷却奖励：只看标记为「奖励型商品」的商城商品。
+// 昨日整天该商品处于可用状态（冷却结束时刻 ≤ 昨日 23:59:59）→ 按「冷却结束
+// 至昨日末的天数」查梯度表发奖（默认 0-3 天 50 / 3-7 天 80 / 7-30 天 120 / ≥30 天 150，
+// 四段金额设置可改）。兑换当天 → 冷却重新开始 → 停发。归属昨日 23:59:59。
+func SettleCooldownReward(db *gorm.DB, now time.Time) {
+	var items []model.ShopItem
+	if err := db.Where("is_reward = ?", true).Find(&items).Error; err != nil || len(items) == 0 {
+		return
+	}
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterdayStart := todayStart.AddDate(0, 0, -1)
+	yKey := yesterdayStart.Format("2006-01-02")
+	var dateSetting model.Settings
+	if err := db.Where("setting_key = ?", "cooldown_reward_date").First(&dateSetting).Error; err == nil && dateSetting.Value == yKey {
+		return
+	}
+	tiers := CooldownRewardTiers(db)
+	chargeAt := yesterdayStart.Add(24*time.Hour - time.Second)
+	db.Transaction(func(tx *gorm.DB) error {
+		var s model.Settings
+		if err := tx.Where("setting_key = ?", "cooldown_reward_date").First(&s).Error; err == nil && s.Value == yKey {
+			return nil
+		}
+		paid := false
+		for _, it := range items {
+			if it.LastRedeemedAt == nil {
+				continue // 从未兑换：没有冷却时间线，不参与
+			}
+			cooldownEnd := it.LastRedeemedAt.Add(time.Duration(it.CooldownDays) * 24 * time.Hour)
+			if cooldownEnd.After(chargeAt) {
+				continue // 昨日末仍在冷却中：不发
+			}
+			days := int(chargeAt.Sub(cooldownEnd).Hours()) / 24 // 冷却结束后经过的整天数
+			amount := cooldownTierAmount(tiers, days)
+			if amount <= 0 {
+				continue
+			}
+			if err := tx.Create(&model.Ledger{
+				Type: "cooldown_reward", Amount: amount, RefID: it.ID,
+				Note:      fmt.Sprintf("无冷却奖励：「%s」可用第 %d 天", it.Name, days+1),
+				CreatedAt: chargeAt,
+			}).Error; err != nil {
+				return err
+			}
+			paid = true
+		}
+		_ = paid
+		return upsertSetting(tx, "cooldown_reward_date", yKey)
+	})
+}
+
+// upsertSetting 幂等标记的写入（存在则更新，不存在则创建）。
+func upsertSetting(tx *gorm.DB, key, value string) error {
+	var s model.Settings
+	if err := tx.Where("setting_key = ?", key).First(&s).Error; err == nil {
+		return tx.Model(&model.Settings{}).Where("setting_key = ?", key).Update("value", value).Error
+	}
+	return tx.Create(&model.Settings{SettingKey: key, Value: value}).Error
+}
+
+// PerfectDayAmount 全勤奖金额（settings perfect_day_amount，默认 50）。
+func PerfectDayAmount(db *gorm.DB) int {
+	var s model.Settings
+	if err := db.Where("setting_key = ?", "perfect_day_amount").First(&s).Error; err != nil {
+		return 50
+	}
+	n, err := strconv.Atoi(s.Value)
+	if err != nil || n < 0 {
+		return 50
+	}
+	return n
+}
+
+// CooldownTier 无冷却奖励的梯度段：Days = 段上限（0 = 无上限），Amount = 每日金额。
+type CooldownTier struct {
+	Days   int `json:"days"`
+	Amount int `json:"amount"`
+}
+
+func defaultCooldownTiers() []CooldownTier {
+	return []CooldownTier{{Days: 3, Amount: 50}, {Days: 7, Amount: 80}, {Days: 30, Amount: 120}, {Days: 0, Amount: 150}}
+}
+
+// CooldownRewardTiers 读取无冷却奖励梯度（settings cooldown_reward_tiers JSON）。
+func CooldownRewardTiers(db *gorm.DB) []CooldownTier {
+	def := defaultCooldownTiers()
+	var s model.Settings
+	if err := db.Where("setting_key = ?", "cooldown_reward_tiers").First(&s).Error; err != nil {
+		return def
+	}
+	var tiers []CooldownTier
+	if err := json.Unmarshal([]byte(s.Value), &tiers); err != nil || len(tiers) == 0 {
+		return def
+	}
+	return tiers
+}
+
+// cooldownTierAmount 按可用天数查梯度金额（段升序，Days=0 表示无上限兜底段）。
+func cooldownTierAmount(tiers []CooldownTier, days int) int {
+	for _, t := range tiers {
+		if t.Days == 0 || days < t.Days {
+			return t.Amount
+		}
+	}
+	if len(tiers) > 0 {
+		return tiers[len(tiers)-1].Amount
+	}
+	return 0
 }
