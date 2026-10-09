@@ -99,8 +99,10 @@
 
       <div class="range-summary" v-if="detailLoaded">
         <span>{{ rangeText }}</span>
-        <span class="rs-earned" :class="{ neg: detailSum < 0 }">
-          <span class="rs-pos">{{ signedNum(detailPos) }}</span>, <span class="rs-neg">{{ signedNum(detailNeg) }}</span>, 共 {{ signedNum(detailSum) }} 分
+        <span class="sum-chips">
+          <span class="sum-chip pos">收 +{{ detailPos }}</span>
+          <span class="sum-chip neg">支 {{ detailNeg }}</span>
+          <span class="sum-chip net" :class="{ neg: detailSum < 0 }">净 {{ signedNum(detailSum) }} 分</span>
         </span>
       </div>
 
@@ -534,10 +536,15 @@ onMounted(() => {
   color: #646566;
   margin-bottom: 8px;
 }
-.rs-earned { color: #1989fa; font-weight: 600; }
-.rs-earned.neg { color: #ee0a24; }
-.rs-pos { color: #07c160; }
-.rs-neg { color: #ee0a24; }
+.sum-chips { display: inline-flex; align-items: center; gap: 6px; }
+.sum-chip {
+  display: inline-block; padding: 2px 9px; border-radius: 10px;
+  font-size: 12px; font-weight: 600; line-height: 1.5;
+}
+.sum-chip.pos { color: #07c160; background: rgba(7, 193, 96, .12); }
+.sum-chip.neg { color: #ee0a24; background: rgba(238, 10, 36, .12); }
+.sum-chip.net { color: #1989fa; font-weight: 700; background: none; padding: 0 2px; }
+.sum-chip.net.neg { color: #ee0a24; }
 .stat-cell b.neg { color: #ee0a24; }
 .detail-list { max-height: 420px; overflow-y: auto; }
 .detail-item {
