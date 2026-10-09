@@ -203,12 +203,20 @@ func ListLedger(db *gorm.DB) gin.HandlerFunc {
 		}
 		var rangeRow struct {
 			Sum int
+			Pos int
+			Neg int
 		}
-		conds(db.Model(&model.Ledger{})).Select("COALESCE(SUM(amount),0) AS sum").Scan(&rangeRow)
+		// Pos/Neg = 收入/支出分列（明细头部 +xxx, -xxx, 共xxx 三段式展示）
+		conds(db.Model(&model.Ledger{})).Select(
+			"COALESCE(SUM(amount),0) AS sum, " +
+				"COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END),0) AS pos, " +
+				"COALESCE(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END),0) AS neg").Scan(&rangeRow)
 		c.JSON(http.StatusOK, gin.H{
 			"items":     items,
 			"balance":   service.PointBalance(db),
 			"range_sum": rangeRow.Sum,
+			"range_pos": rangeRow.Pos,
+			"range_neg": rangeRow.Neg,
 		})
 	}
 }

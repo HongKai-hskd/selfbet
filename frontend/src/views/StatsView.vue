@@ -99,7 +99,9 @@
 
       <div class="range-summary" v-if="detailLoaded">
         <span>{{ rangeText }}</span>
-        <span class="rs-earned" :class="{ neg: detailSum < 0 }">共 {{ signedNum(detailSum) }} 分</span>
+        <span class="rs-earned" :class="{ neg: detailSum < 0 }">
+          <span class="rs-pos">{{ signedNum(detailPos) }}</span>, <span class="rs-neg">{{ signedNum(detailNeg) }}</span>, 共 {{ signedNum(detailSum) }} 分
+        </span>
       </div>
 
       <div class="detail-list">
@@ -164,6 +166,8 @@ const customStart = ref('')
 const customEnd = ref('')
 const detailItems = ref([])
 const detailSum = ref(0)
+const detailPos = ref(0)
+const detailNeg = ref(0)
 const detailLoaded = ref(false)
 const pickStart = ref(false)
 const pickEnd = ref(false)
@@ -346,6 +350,8 @@ async function loadDetail() {
   const res = await api.get('/ledger', { params })
   detailItems.value = res.items || []
   detailSum.value = res.range_sum || 0
+  detailPos.value = res.range_pos || 0
+  detailNeg.value = res.range_neg || 0
   detailLoaded.value = true
 }
 
@@ -530,6 +536,8 @@ onMounted(() => {
 }
 .rs-earned { color: #1989fa; font-weight: 600; }
 .rs-earned.neg { color: #ee0a24; }
+.rs-pos { color: #07c160; }
+.rs-neg { color: #ee0a24; }
 .stat-cell b.neg { color: #ee0a24; }
 .detail-list { max-height: 420px; overflow-y: auto; }
 .detail-item {
