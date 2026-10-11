@@ -25,17 +25,18 @@
         </div>
         <div class="shop-actions">
           <van-button
-            v-if="cooldownLeft(item) > 0" size="small" round plain disabled
+            v-if="cooldownLeft(item) > 0" size="small" round type="warning"
+            :loading="redeemingId === item.id" @click="openRedeem(item)"
           >
-            冷却 {{ cooldownLeft(item) }} 天
+            冷却 {{ cooldownLeft(item) }} 天 · {{ unitPrice(item) }} 分
           </van-button>
           <van-button
             v-else size="small" round
             :type="balance >= item.price ? 'primary' : 'warning'"
-            :disabled="balance - item.price < -500"
+            :disabled="balance - item.price < -advanceLimit"
             :loading="redeemingId === item.id" @click="openRedeem(item)"
           >
-            {{ balance >= item.price ? '兑换' : (balance - item.price >= -500 ? '透支兑换' : '超透支额度') }}
+            {{ balance >= item.price ? '兑换' : (balance - item.price >= -advanceLimit ? '透支兑换' : '超透支额度') }}
           </van-button>
           <van-icon name="edit" class="del-icon" @click="openForm(item)" />
           <van-icon name="delete-o" class="del-icon" @click="remove(item)" />
@@ -102,20 +103,20 @@
       <div class="form-title">兑换确认</div>
       <template v-if="redeemItem">
         <div class="rd-name">{{ redeemItem.name }}</div>
-        <div class="rd-price">单价 {{ redeemItem.price }} 分</div>
+        <div class="rd-price">单价 {{ unitPrice(redeemItem) }} 分<span v-if="cooldownLeft(redeemItem) > 0" class="rd-premium">（冷却期溢价 ×{{ (premiumPercent / 100).toFixed(2).replace(/0+$/, '').replace(/\.$/, '') }}）</span></div>
         <div class="rd-qty">
           <span class="rd-label">兑换数量</span>
           <van-stepper v-model="redeemQty" :min="1" :max="maxQty" integer />
         </div>
         <div class="rd-total">
           <span>合计</span>
-          <b class="rd-total-num">{{ redeemItem.price * redeemQty }}</b>
+          <b class="rd-total-num">{{ unitPrice(redeemItem) * redeemQty }}</b>
           <span>分</span>
         </div>
-        <div class="rd-balance" :class="{ over: balance - redeemItem.price * redeemQty < 0 }">
-          兑换后剩余 {{ balance - redeemItem.price * redeemQty }} 分<template v-if="balance - redeemItem.price * redeemQty < 0">（透支）</template>
+        <div class="rd-balance" :class="{ over: balance - unitPrice(redeemItem) * redeemQty < 0 }">
+          兑换后剩余 {{ balance - unitPrice(redeemItem) * redeemQty }} 分<template v-if="balance - unitPrice(redeemItem) * redeemQty < 0">（透支）</template>
         </div>
-        <van-button round block type="primary" style="margin-top: 18px" :loading="redeemingId != null" :disabled="balance - redeemItem.price * redeemQty < -500" @click="confirmRedeem">
+        <van-button round block type="primary" style="margin-top: 18px" :loading="redeemingId != null" :disabled="balance - unitPrice(redeemItem) * redeemQty < -advanceLimit" @click="confirmRedeem">
           确认兑换
         </van-button>
       </template>
@@ -184,6 +185,15 @@ function fmtTime(s) {
   return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+const premiumPercent = ref(200)
+const advanceLimit = ref(500)
+
+// 冷却中 → 溢价单价（设置页可配，默认 200% = 双倍）
+function unitPrice(item) {
+  if (cooldownLeft(item) > 0) return Math.round(item.price * premiumPercent.value / 100)
+  return item.price
+}
+
 function cooldownLeft(item) {
   if (!item.cooldown_days || !item.last_redeemed_at) return 0
   const end = new Date(item.last_redeemed_at).getTime() + item.cooldown_days * 86400000
@@ -192,6 +202,10 @@ function cooldownLeft(item) {
 }
 
 async function load() {
+  api.get('/settle-settings').then((st) => {
+    if (st.cooldown_premium_percent >= 100) premiumPercent.value = st.cooldown_premium_percent
+    if (st.advance_limit >= 0) advanceLimit.value = st.advance_limit
+  }).catch(() => {})
   const [s, l, c] = await Promise.all([api.get('/shop'), api.get('/ledger', { params: { limit: 1 } }), api.get('/cash')])
   items.value = s.items || []
   balance.value = l.balance
@@ -392,4 +406,8 @@ async function remove(item) {
 .rd-total-num { font-size: 34px; font-weight: 700; color: #1989fa; }
 .rd-balance { text-align: center; font-size: 12px; color: #c8c9cc; margin-top: 6px; }
 .rd-balance.over { color: #ee0a24; font-weight: 600; }
+</style>
+
+<style>
+.rd-premium { color: #ff976a; font-size: 12px; margin-left: 4px; }
 </style>

@@ -31,8 +31,8 @@
     </div>
     <div class="backpack-entry" @click="$router.push('/settle-settings')">
       <div class="be-icon">⚙️</div>
-      <div class="be-name">结算设置</div>
-      <div class="be-sub">全勤奖 / 无冷却奖励 / 结算顺序</div>
+      <div class="be-name">设置</div>
+      <div class="be-sub">结算顺序 / 可预支 / 利息 / 溢价</div>
       <van-icon name="arrow" class="be-arrow" />
     </div>
 

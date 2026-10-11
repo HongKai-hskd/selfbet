@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -121,17 +122,18 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 				}
 				return nil
 			}
-			// 余额地板：积分最多透支到 PointsFloor，超出部分减免
+			// 余额地板：积分最多透支到「可预支金额」下限，超出部分减免
 			// （D/E 的收益放大/对冲在每日净值结算层统一处理，见 SettleDailyBonus）
 			bal := PointBalance(tx)
+			floor := PointFloorValue(tx)
 			pts := -t.Penalty
 			noteSuffix := ""
-			if bal+pts < model.PointsFloor {
-				pts = model.PointsFloor - bal
+			if bal+pts < floor {
+				pts = floor - bal
 				if pts >= 0 {
 					return nil // 已在地板上，本周期免扣（结算标记已记）
 				}
-				noteSuffix = "（触及 " + strconv.Itoa(model.PointsFloor) + " 下限，减免 " + strconv.Itoa(t.Penalty+pts) + " 分）"
+				noteSuffix = "（触及 " + strconv.Itoa(floor) + " 下限，减免 " + strconv.Itoa(t.Penalty+pts) + " 分）"
 			}
 			return tx.Create(&model.Ledger{
 				Type: "penalty", Amount: pts, RefID: t.ID, Note: note + noteSuffix, CreatedAt: chargeAt,
@@ -148,13 +150,14 @@ func SettlePenalties(db *gorm.DB, now time.Time) {
 // 后结算项（丰收祝福）的基数，形成连锁放大。所有行回溯昨日 23:59:59。
 
 const (
-	SettleKeyPerfectDay     = "perfect_day"     // 全勤奖
-	SettleKeyCooldownReward = "cooldown_reward" // 无冷却奖励
-	SettleKeyFarmBoost      = "farm_boost"      // 丰收祝福（压轴）
+	SettleKeyOverdraftInterest = "overdraft_interest" // 透支利息（扣项）
+	SettleKeyPerfectDay        = "perfect_day"        // 全勤奖
+	SettleKeyCooldownReward    = "cooldown_reward"    // 无冷却奖励
+	SettleKeyFarmBoost         = "farm_boost"         // 丰收祝福（压轴）
 )
 
 func defaultSettleOrder() []string {
-	return []string{SettleKeyPerfectDay, SettleKeyCooldownReward, SettleKeyFarmBoost}
+	return []string{SettleKeyOverdraftInterest, SettleKeyPerfectDay, SettleKeyCooldownReward, SettleKeyFarmBoost}
 }
 
 // SettlementOrder 读取结算顺序设置（缺省/损坏时回默认并补全缺失项）。
@@ -168,7 +171,7 @@ func SettlementOrder(db *gorm.DB) []string {
 	if err := json.Unmarshal([]byte(s.Value), &order); err != nil {
 		return def
 	}
-	valid := map[string]bool{SettleKeyPerfectDay: true, SettleKeyCooldownReward: true, SettleKeyFarmBoost: true}
+	valid := map[string]bool{SettleKeyOverdraftInterest: true, SettleKeyPerfectDay: true, SettleKeyCooldownReward: true, SettleKeyFarmBoost: true}
 	seen := map[string]bool{}
 	out := []string{}
 	for _, k := range order {
@@ -177,9 +180,16 @@ func SettlementOrder(db *gorm.DB) []string {
 			seen[k] = true
 		}
 	}
-	for _, k := range def {
+	// 缺失项（如旧版设置没有新增结算项）按「默认顺序的相对位置」插入，
+	// 而不是一律追加到尾部——否则新增的扣项会被排到奖励之后
+	for i, k := range def {
 		if !seen[k] {
-			out = append(out, k)
+			pos := i
+			if pos > len(out) {
+				pos = len(out)
+			}
+			out = append(out[:pos], append([]string{k}, out[pos:]...)...)
+			seen[k] = true
 		}
 	}
 	return out
@@ -190,6 +200,8 @@ func SettleAll(db *gorm.DB, now time.Time) {
 	SettlePenalties(db, now) // 顺序 0 固定最前：昨日账的基础，其余项依赖它
 	for _, key := range SettlementOrder(db) {
 		switch key {
+		case SettleKeyOverdraftInterest:
+			SettleOverdraftInterest(db, now)
 		case SettleKeyPerfectDay:
 			SettlePerfectDay(db, now)
 		case SettleKeyCooldownReward:
@@ -349,4 +361,89 @@ func cooldownTierAmount(tiers []CooldownTier, days int) int {
 		return tiers[len(tiers)-1].Amount
 	}
 	return 0
+}
+
+// ---- 设置读取器（可预支金额 / 透支利率 / 冷却溢价）----
+
+// PointFloorValue 余额地板（负值）：settings advance_limit（可预支金额，正数），默认 500 → -500。
+func PointFloorValue(db *gorm.DB) int {
+	limit := 500
+	var s model.Settings
+	if err := db.Where("setting_key = ?", "advance_limit").First(&s).Error; err == nil {
+		if n, err := strconv.Atoi(s.Value); err == nil && n >= 0 {
+			limit = n
+		}
+	}
+	return -limit
+}
+
+// OverdraftDailyRate 透支日利率（百分数整数，默认 0 = 不计息）。
+func OverdraftDailyRate(db *gorm.DB) int {
+	var s model.Settings
+	if err := db.Where("setting_key = ?", "overdraft_daily_rate").First(&s).Error; err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(s.Value)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// CooldownPremiumPercent 冷却期购买溢价（百分数，默认 200 = 双倍价）。
+func CooldownPremiumPercent(db *gorm.DB) int {
+	var s model.Settings
+	if err := db.Where("setting_key = ?", "cooldown_premium_percent").First(&s).Error; err != nil {
+		return 200
+	}
+	n, err := strconv.Atoi(s.Value)
+	if err != nil || n < 100 {
+		return 200
+	}
+	return n
+}
+
+// SettleOverdraftInterest 透支利息：余额为负时按「当日欠款 × 日利率」扣息，
+// 利息计入欠款（自然复利）；受可预支地板约束不击穿。每日一次（幂等键
+// overdraft_interest_date），行 created_at 回溯昨日 23:59:59。
+func SettleOverdraftInterest(db *gorm.DB, now time.Time) {
+	rate := OverdraftDailyRate(db)
+	if rate <= 0 {
+		return // 默认不计息（设置页填入利率即启用）
+	}
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterdayStart := todayStart.AddDate(0, 0, -1)
+	yKey := yesterdayStart.Format("2006-01-02")
+	var dateSetting model.Settings
+	if err := db.Where("setting_key = ?", "overdraft_interest_date").First(&dateSetting).Error; err == nil && dateSetting.Value == yKey {
+		return
+	}
+	chargeAt := yesterdayStart.Add(24*time.Hour - time.Second)
+	db.Transaction(func(tx *gorm.DB) error {
+		var s model.Settings
+		if err := tx.Where("setting_key = ?", "overdraft_interest_date").First(&s).Error; err == nil && s.Value == yKey {
+			return nil
+		}
+		bal := PointBalance(tx)
+		if bal >= 0 {
+			return upsertSetting(tx, "overdraft_interest_date", yKey) // 不欠款不计息
+		}
+		debt := -bal
+		interest := int(math.Round(float64(debt) * float64(rate) / 100))
+		floor := PointFloorValue(tx)
+		if bal-interest < floor {
+			interest = bal - floor // 利息不击穿地板
+		}
+		if interest <= 0 {
+			return upsertSetting(tx, "overdraft_interest_date", yKey)
+		}
+		if err := tx.Create(&model.Ledger{
+			Type: "overdraft_interest", Amount: -interest,
+			Note:      fmt.Sprintf("透支利息：欠 %d × %d%% = %d 分", debt, rate, interest),
+			CreatedAt: chargeAt,
+		}).Error; err != nil {
+			return err
+		}
+		return upsertSetting(tx, "overdraft_interest_date", yKey)
+	})
 }

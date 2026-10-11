@@ -1,6 +1,7 @@
 package service
 
 import (
+	"math"
 	"strconv"
 	"time"
 
@@ -32,23 +33,29 @@ func RedeemShopItem(db *gorm.DB, itemID uint, qty int) (*RedeemResult, error) {
 			return BizErr(404, "商品不存在")
 		}
 		balance := PointBalance(tx)
-		total := item.Price * qty
-		// 透支额度：兑换后余额最低到 PointsFloor（与罚分共用 -500）
-		if balance-total < model.PointsFloor {
-			return BizErr(400, "超出透支额度，还差 %d 分", total-balance+model.PointsFloor)
-		}
-		// cooldown check
+		unit := item.Price
+		inCooldown := false
+		// 冷却中可购买（2026-10-11 拍板：避免意外情况），价格 × 溢价（默认 200% = 双倍），
+		// 购买后冷却重新计时
 		if item.CooldownDays > 0 && item.LastRedeemedAt != nil {
 			cd := time.Duration(item.CooldownDays) * 24 * time.Hour
-			elapsed := time.Since(*item.LastRedeemedAt)
-			if elapsed < cd {
-				remain := cd - elapsed
-				return BizErr(400, "冷却中，还剩 %d 天 %d 小时", int(remain.Hours())/24, int(remain.Hours())%24)
+			if time.Since(*item.LastRedeemedAt) < cd {
+				inCooldown = true
+				unit = int(math.Round(float64(unit) * float64(CooldownPremiumPercent(tx)) / 100))
 			}
+		}
+		total := unit * qty
+		// 透支额度：兑换后余额最低到「可预支金额」地板（与罚分共用）
+		floor := PointFloorValue(tx)
+		if balance-total < floor {
+			return BizErr(400, "超出透支额度，还差 %d 分", total-balance+floor)
 		}
 		note := "兑换：" + item.Name
 		if qty > 1 {
 			note += " ×" + strconv.Itoa(qty)
+		}
+		if inCooldown {
+			note += "（冷却期溢价 ×" + strconv.FormatFloat(float64(CooldownPremiumPercent(tx))/100, 'f', -1, 64) + "）"
 		}
 		if err := tx.Create(&model.Ledger{Type: "shop", Amount: -total, RefID: item.ID, Note: note}).Error; err != nil {
 			return err
