@@ -58,18 +58,13 @@
           <div class="pl-sub">{{ remainText(p) }}</div>
         </template>
         <!-- 成熟可收 -->
-        <template v-else-if="p.daily_left > 0">
+        <template v-else>
           <div class="pl-crop mature">🌾</div>
           <div class="pl-sub gold">可收 +{{ fmtNum(farm.yield_per_round) }}</div>
         </template>
-        <!-- 成熟但今日已满 -->
-        <template v-else>
-          <div class="pl-crop dim">🌾</div>
-          <div class="pl-sub">今日已满</div>
-        </template>
       </div>
     </div>
-    <div class="tip">每天每块田最多收 2 轮（每轮收获 = 田数 × 单格收获 × 2）；成熟忘收不枯死</div>
+    <div class="tip">成熟即可收，收完免费再种（每轮收获 = 田数 × 单格收获）；成熟忘收不枯死</div>
 
     <!-- 升级区 -->
     <div class="section-title">农场升级</div>
@@ -104,7 +99,7 @@ let timer = null
 const tick = ref(Date.now())
 
 const emptyCount = computed(() => farm.value.plots.filter((p) => p.unlocked && !p.planted_at).length)
-const harvestableCount = computed(() => farm.value.plots.filter((p) => p.unlocked && p.planted_at && matureAt(p) && p.daily_left > 0).length)
+const harvestableCount = computed(() => farm.value.plots.filter((p) => p.unlocked && p.planted_at && matureAt(p)).length)
 const unlockedCount = computed(() => farm.value.plots.filter((p) => p.unlocked).length)
 // 每轮收获 = 全部已开垦田一轮合计（= 一键全收一次的满额）
 const roundIncome = computed(() => farm.value.yield_per_round * unlockedCount.value)

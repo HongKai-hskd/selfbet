@@ -32,7 +32,6 @@ const (
 	farmDStep       = 1.5    // D 线递增
 	farmEBase       = 5000.0 // E 线首级价（农场积分）
 	farmEStep       = 1.2    // E 线递增
-	farmDailyMax    = 2      // 每田每日收获上限
 )
 
 // FarmYieldPerRound 每轮收获的农场积分（A、B 乘法合成）。
@@ -86,18 +85,6 @@ func getFarmState(db *gorm.DB) (*model.FarmState, error) {
 	return &s, nil
 }
 
-// farmDailyLeft 当日剩余可收轮次（读取时内存判定，收获时才写回重置）。
-func farmDailyLeft(p *model.FarmPlot) int {
-	if p.DailyDate != farmToday() {
-		return farmDailyMax
-	}
-	left := farmDailyMax - p.DailyCount
-	if left < 0 {
-		left = 0
-	}
-	return left
-}
-
 func countUnlocked(db *gorm.DB) int64 {
 	var n int64
 	db.Model(&model.FarmPlot{}).Where("unlocked = ?", true).Count(&n)
@@ -125,7 +112,6 @@ func GetFarmView(db *gorm.DB) (map[string]any, error) {
 			"plot_index":   p.PlotIndex,
 			"unlocked":     p.Unlocked,
 			"planted_at":   p.PlantedAt,
-			"daily_left":   farmDailyLeft(&p),
 			"progress":     0.0,
 			"mature":       false, // 空田分支也落键，保持与旧 struct 版相同的 JSON 契约
 			"harvestable":  false,
@@ -138,7 +124,7 @@ func GetFarmView(db *gorm.DB) (map[string]any, error) {
 			}
 			v["progress"] = progress
 			v["mature"] = elapsed >= periodH
-			harvestable := v["mature"].(bool) && v["daily_left"].(int) > 0
+			harvestable := v["mature"].(bool)
 			v["harvestable"] = harvestable
 			if harvestable {
 				harvestNow += yield
@@ -168,7 +154,7 @@ func GetFarmView(db *gorm.DB) (map[string]any, error) {
 		"level_e":          s.LevelE,
 		"yield_per_round":  yield,
 		"period_hours":     periodH,
-		"daily_income_max": yield * float64(farmDailyMax) * math.Max(1, float64(countUnlocked(db))),
+		"daily_income_max": yield * (24 / periodH) * math.Max(1, float64(countUnlocked(db))), // 纯冷却制理论日上限
 		"plots":            views,
 		"next_plot_index":  nextIdx,
 		"next_plot_price":  nextPrice,
@@ -241,20 +227,12 @@ func HarvestFarm(db *gorm.DB, all bool, plotIndex *int) (*HarvestResult, error) 
 		periodH := FarmPeriodHours(s)
 		yield := FarmYieldPerRound(s)
 		now := time.Now()
-		today := farmToday()
 		hits := []model.FarmPlot{}
 		for _, p := range plots {
 			if now.Sub(*p.PlantedAt).Hours() < periodH {
 				continue // 未成熟
 			}
-			if p.DailyDate != today {
-				p.DailyCount = 0
-				p.DailyDate = today
-			}
-			if p.DailyCount >= farmDailyMax {
-				continue // 今日已满 2 轮：熟了挂着过夜，不惩罚
-			}
-			hits = append(hits, p)
+			hits = append(hits, p) // 纯冷却制：成熟即可收（2026-10-11 拍板，移除每日 2 轮上限）
 		}
 		if len(hits) == 0 {
 			return BizErr(400, "没有可收获的作物（未成熟或今日轮次已满）")
@@ -262,10 +240,9 @@ func HarvestFarm(db *gorm.DB, all bool, plotIndex *int) (*HarvestResult, error) 
 		for _, p := range hits {
 			res.Gained += yield
 			res.Harvested++
-			p.DailyCount++
 			p.PlantedAt = nil
 			if err := tx.Model(&model.FarmPlot{}).Where("id = ?", p.ID).
-				Updates(map[string]any{"planted_at": nil, "daily_count": p.DailyCount, "daily_date": p.DailyDate}).Error; err != nil {
+				Update("planted_at", nil).Error; err != nil {
 				return err
 			}
 		}

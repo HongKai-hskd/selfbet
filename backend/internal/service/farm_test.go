@@ -109,21 +109,11 @@ func TestFarmHarvestDailyCap(t *testing.T) {
 	if _, err := HarvestFarm(db, false, intPtr(0)); err != nil {
 		t.Fatalf("round2 err=%v", err)
 	}
-	// 第 3 轮：今日已满 → 拒绝
+	// 第 3 轮：纯冷却制（2026-10-11 移除每日 2 轮上限）→ 照样可收
 	plantAt(t, db, 0, 9)
-	if _, err := HarvestFarm(db, false, intPtr(0)); err == nil {
-		t.Fatal("round3 should be rejected (daily cap)")
-	}
-	var p model.FarmPlot
-	db.Where("plot_index = ?", 0).First(&p)
-	if p.PlantedAt == nil {
-		t.Fatal("mature crop should stay in field when daily cap reached (永不枯死)")
-	}
-	// 跨天重置：把 DailyDate 拨成昨天 → 又能收
-	db.Model(&model.FarmPlot{}).Where("plot_index = ?", 0).
-		Update("daily_date", time.Now().AddDate(0, 0, -1).Format("2006-01-02"))
-	if _, err := HarvestFarm(db, false, intPtr(0)); err != nil {
-		t.Fatalf("after date reset should harvest, err=%v", err)
+	res3, err := HarvestFarm(db, false, intPtr(0))
+	if err != nil || res3.Harvested != 1 {
+		t.Fatalf("round3 (cooldown-only) err=%v res=%+v, want harvest ok", err, res3)
 	}
 }
 

@@ -167,8 +167,8 @@ type FarmPlot struct {
 	PlotIndex  int        `gorm:"uniqueIndex" json:"plot_index"` // 0..23，顺序解锁
 	Unlocked   bool       `json:"unlocked"`
 	PlantedAt  *time.Time `json:"planted_at"` // nil = 空田
-	DailyCount int        `json:"daily_count"` // 当日已收获轮次（0-2）
-	DailyDate  string     `json:"daily_date"`  // 轮次计数归属的本地日期 YYYY-MM-DD
+	DailyCount int        `json:"daily_count"` // [废弃 2026-10-11] 每日 2 轮上限已移除，列保留兼容
+	DailyDate  string     `json:"daily_date"`  // [废弃 2026-10-11] 同上
 }
 
 // Settings 是键值配置表：登录密码等运行时设置存这里（替代旧 config.json 的密码字段）。
