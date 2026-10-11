@@ -10,6 +10,7 @@
       <div class="view-tabs">
         <span class="chip" :class="{ active: view === 'week' }" @click="setView('week')">周</span>
         <span class="chip" :class="{ active: view === 'day' }" @click="setView('day')">日</span>
+        <span class="chip" :class="{ active: showDone }" @click="showDone = !showDone">已完成</span>
       </div>
     </div>
 
@@ -38,6 +39,7 @@
                   v-for="b in blocksByCol[di] || []"
                   :key="b.key"
                   class="block"
+                  :class="{ done: b.done }"
                   :style="blockStyle(b)"
                 >
                   <div class="b-name">{{ b.title }}</div>
@@ -58,6 +60,7 @@ import api from '../api'
 
 const HOUR_H = 48 // 每小时像素高
 const tasks = ref([])
+const showDone = ref(false) // 是否展示已完成事项（默认隐藏，2026-10-11 用户需求）
 const tags = ref([])
 const anchor = ref(startOfDay(new Date()))
 const view = ref('week')
@@ -116,7 +119,7 @@ async function load() {
 
 const scheduledTasks = computed(() =>
   (tasks.value || []).filter((t) => {
-    if (t.status === 'done') return false // 已完成隐藏
+    if (t.status === 'done' && !showDone.value) return false // 已完成默认隐藏，开「已完成」后展示
     if (t.repeat === 'once') return t.expected_start_at && t.expected_end_at
     return t.expected_start_time && t.expected_end_time && (t.repeat === 'daily' || t.expected_weekday)
   })
@@ -147,14 +150,14 @@ const blocks = computed(() => {
         const s = new Date(t.expected_start_at)
         const e = new Date(t.expected_end_at)
         if (s >= dayStart && s < dayEnd) {
-          out.push({ key: `${t.id}-o-${di}`, di, title: t.title, color, startMin: minutesOfDay(s), endMin: minutesOfDay(e), timeText: `${fmtMin(minutesOfDay(s))}~${fmtMin(minutesOfDay(e))}` })
+          out.push({ key: `${t.id}-o-${di}`, di, title: t.title, color, done: t.status === 'done', startMin: minutesOfDay(s), endMin: minutesOfDay(e), timeText: `${fmtMin(minutesOfDay(s))}~${fmtMin(minutesOfDay(e))}` })
         }
       } else if (t.repeat === 'daily') {
-        out.push({ key: `${t.id}-d-${di}`, di, title: t.title, color, startMin: hm(t.expected_start_time), endMin: hm(t.expected_end_time), timeText: `${t.expected_start_time}~${t.expected_end_time}` })
+        out.push({ key: `${t.id}-d-${di}`, di, title: t.title, color, done: t.status === 'done', startMin: hm(t.expected_start_time), endMin: hm(t.expected_end_time), timeText: `${t.expected_start_time}~${t.expected_end_time}` })
       } else {
         const iso = ((d.getDay() + 6) % 7) + 1 // 1=周一..7=周日
         if (iso === t.expected_weekday) {
-          out.push({ key: `${t.id}-w-${di}`, di, title: t.title, color, startMin: hm(t.expected_start_time), endMin: hm(t.expected_end_time), timeText: `${t.expected_start_time}~${t.expected_end_time}` })
+          out.push({ key: `${t.id}-w-${di}`, di, title: t.title, color, done: t.status === 'done', startMin: hm(t.expected_start_time), endMin: hm(t.expected_end_time), timeText: `${t.expected_start_time}~${t.expected_end_time}` })
         }
       }
     }
@@ -210,6 +213,8 @@ onMounted(async () => {
 
 <style scoped>
 .page { min-height: 100vh; background: #f7f8fa; }
+.block.done { opacity: .5; }
+.block.done .b-name { text-decoration: line-through; }
 .toolbar {
   display: flex;
   align-items: center;
