@@ -238,12 +238,14 @@ const hasMultiRound = computed(() => tasks.value.some((t) => t.multi_round && t.
   })
   // 已完成 Tab：后端已按完成时间倒序；进行中/待办可按截止期排序
   if (filter.value === 2 || !sortByDue.value) return list
-  return [...list].sort((a, b) => {
-    if (!a.due_at && !b.due_at) return 0
-    if (!a.due_at) return 1
-    if (!b.due_at) return -1
-    return new Date(a.due_at) - new Date(b.due_at)
-  })
+  // 统一时间键：有区间的任务按「区间开始时间」排序，无区间按截止时刻
+  // ——时间早的在上（2026-10-11 用户需求：同一天的区间任务按开始时间升序）
+  const sortKey = (t) => {
+    if (t.expected_start_at) return new Date(t.expected_start_at).getTime()
+    if (t.due_at) return new Date(t.due_at).getTime()
+    return Infinity // 无截止无区间的排最后
+  }
+  return [...list].sort((a, b) => sortKey(a) - sortKey(b))
 })
 
 const listEl = ref(null)
