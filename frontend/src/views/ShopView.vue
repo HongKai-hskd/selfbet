@@ -28,7 +28,7 @@
             v-if="cooldownLeft(item) > 0" size="small" round type="warning"
             :loading="redeemingId === item.id" @click="openRedeem(item)"
           >
-            冷却 {{ cooldownLeft(item) }} 天 · {{ unitPrice(item) }} 分
+            冷却 {{ cooldownLeft(item) }} 天 · {{ unitPrice(item) }} 分<template v-if="premiumStreakNext(item) > 1">（×{{ premiumMult(item) }}）</template>
           </van-button>
           <van-button
             v-else size="small" round
@@ -103,7 +103,7 @@
       <div class="form-title">兑换确认</div>
       <template v-if="redeemItem">
         <div class="rd-name">{{ redeemItem.name }}</div>
-        <div class="rd-price">单价 {{ unitPrice(redeemItem) }} 分<span v-if="cooldownLeft(redeemItem) > 0" class="rd-premium">（冷却期溢价 ×{{ (premiumPercent / 100).toFixed(2).replace(/0+$/, '').replace(/\.$/, '') }}）</span></div>
+        <div class="rd-price">单价 {{ unitPrice(redeemItem) }} 分<span v-if="cooldownLeft(redeemItem) > 0" class="rd-premium">（冷却期第 {{ premiumStreakNext(redeemItem) }} 次溢价 ×{{ premiumMult(redeemItem) }}）</span></div>
         <div class="rd-qty">
           <span class="rd-label">兑换数量</span>
           <van-stepper v-model="redeemQty" :min="1" :max="maxQty" integer />
@@ -188,9 +188,17 @@ function fmtTime(s) {
 const premiumPercent = ref(200)
 const advanceLimit = ref(500)
 
-// 冷却中 → 溢价单价（设置页可配，默认 200% = 双倍）
+// 冷却中 → 溢价单价：溢价^连续次数（第 1 次 ×2、第 2 次 ×4、第 3 次 ×8…）
+// 溢价基数设置页可配（默认 200%）；冷却自然结束后 streak 归零、价格回正常
+function premiumStreakNext(item) {
+  return (item.premium_streak || 0) + 1
+}
+function premiumMult(item) {
+  const m = Math.pow(premiumPercent.value / 100, premiumStreakNext(item))
+  return Math.round(m * 100) / 100
+}
 function unitPrice(item) {
-  if (cooldownLeft(item) > 0) return Math.round(item.price * premiumPercent.value / 100)
+  if (cooldownLeft(item) > 0) return Math.round(item.price * premiumMult(item))
   return item.price
 }
 

@@ -119,6 +119,7 @@ type ShopItem struct {
 	CooldownDays   int        `json:"cooldown_days"`
 	LastRedeemedAt *time.Time `json:"last_redeemed_at"`
 	IsReward       bool       `json:"is_reward"` // 奖励型商品：无冷却奖励的计时对象（docs/02 2026-10-05 决议）
+	PremiumStreak  int        `json:"premium_streak"` // 连续冷却期购买次数：价格 ×溢价^次数（冷却自然结束归零）
 	CreatedAt      time.Time  `json:"created_at"`
 }
 

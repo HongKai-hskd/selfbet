@@ -35,13 +35,17 @@ func RedeemShopItem(db *gorm.DB, itemID uint, qty int) (*RedeemResult, error) {
 		balance := PointBalance(tx)
 		unit := item.Price
 		inCooldown := false
-		// 冷却中可购买（2026-10-11 拍板：避免意外情况），价格 × 溢价（默认 200% = 双倍），
+		newStreak := 0
+		// 冷却中可购买（2026-10-11 拍板），价格 × 溢价^连续次数（2026-10-13 拍板：
+		// 冷却期内每再买一次，价格继续翻倍：base→×2→×4→×8…；冷却自然结束则归零）。
 		// 购买后冷却重新计时
 		if item.CooldownDays > 0 && item.LastRedeemedAt != nil {
 			cd := time.Duration(item.CooldownDays) * 24 * time.Hour
 			if time.Since(*item.LastRedeemedAt) < cd {
 				inCooldown = true
-				unit = int(math.Round(float64(unit) * float64(CooldownPremiumPercent(tx)) / 100))
+				newStreak = item.PremiumStreak + 1
+				mult := math.Pow(float64(CooldownPremiumPercent(tx))/100, float64(newStreak))
+				unit = int(math.Round(float64(item.Price) * mult))
 			}
 		}
 		total := unit * qty
@@ -55,7 +59,8 @@ func RedeemShopItem(db *gorm.DB, itemID uint, qty int) (*RedeemResult, error) {
 			note += " ×" + strconv.Itoa(qty)
 		}
 		if inCooldown {
-			note += "（冷却期溢价 ×" + strconv.FormatFloat(float64(CooldownPremiumPercent(tx))/100, 'f', -1, 64) + "）"
+			mult := math.Pow(float64(CooldownPremiumPercent(tx))/100, float64(newStreak))
+			note += "（冷却期第 " + strconv.Itoa(newStreak) + " 次溢价 ×" + strconv.FormatFloat(mult, 'f', -1, 64) + "）"
 		}
 		if err := tx.Create(&model.Ledger{Type: "shop", Amount: -total, RefID: item.ID, Note: note}).Error; err != nil {
 			return err
@@ -65,11 +70,15 @@ func RedeemShopItem(db *gorm.DB, itemID uint, qty int) (*RedeemResult, error) {
 		}
 		if item.CooldownDays > 0 {
 			now := time.Now()
-			if err := tx.Model(&item).Update("last_redeemed_at", now).Error; err != nil {
+			if err := tx.Model(&item).Updates(map[string]any{
+				"last_redeemed_at": now,
+				"premium_streak":   newStreak, // 冷却中递增、正常购买归零（冷却自然结束 → 下次购买归零）
+			}).Error; err != nil {
 				return err
 			}
 			item.LastRedeemedAt = &now
 		}
+		item.PremiumStreak = newStreak
 		item.RedeemedCount += qty
 		out = RedeemResult{Balance: balance - total, Item: item, Quantity: qty, Total: total}
 		return nil
