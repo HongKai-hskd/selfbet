@@ -36,12 +36,18 @@ const (
 
 // FarmYieldPerRound 每轮收获的农场积分（A、B 乘法合成）。
 func FarmYieldPerRound(s *model.FarmState) float64 {
-	return farmBaseYield * (1+0.02*float64(s.LevelA)) * (1+0.06*float64(s.LevelB))
+	// 基础套（A/B）与拓展套（A1/B1）乘法合成（2026-11-07 拍板）
+	return farmBaseYield *
+		(1 + 0.02*float64(s.LevelA)) * (1 + 0.06*float64(s.LevelB)) *
+		(1 + 0.02*float64(s.LevelA1)) * (1 + 0.06*float64(s.LevelB1))
 }
 
 // FarmPeriodHours 当前有效生长周期（B 副作用与 C 线加法合成，A 无副作用）。
 func FarmPeriodHours(s *model.FarmState) float64 {
-	h := farmBasePeriodH * (1 + 0.08*float64(s.LevelB) - 0.05*float64(s.LevelC))
+	// 两套周期副作用乘法合成（B1/C1 与 B/C 同机制：B +8%/级、C −5%/级）
+	f1 := 1 + 0.08*float64(s.LevelB) - 0.05*float64(s.LevelC)
+	f2 := 1 + 0.08*float64(s.LevelB1) - 0.05*float64(s.LevelC1)
+	h := farmBasePeriodH * f1 * f2
 	if h < 1 {
 		h = 1 // 保险丝：合成参数异常时周期不为负
 	}
@@ -158,6 +164,12 @@ func GetFarmView(db *gorm.DB) (map[string]any, error) {
 		"plots":            views,
 		"next_plot_index":  nextIdx,
 		"next_plot_price":  nextPrice,
+		"level_a1":         s.LevelA1,
+		"level_b1":         s.LevelB1,
+		"level_c1":         s.LevelC1,
+		"upgrade_a1":       upg(s.LevelA1, FarmUpgradePrice),
+		"upgrade_b1":       upg(s.LevelB1, FarmUpgradePrice),
+		"upgrade_c1":       upg(s.LevelC1, FarmUpgradePrice),
 		"upgrade_a":        upg(s.LevelA, FarmUpgradePrice),
 		"upgrade_b":        upg(s.LevelB, FarmUpgradePrice),
 		"upgrade_c":        upg(s.LevelC, FarmUpgradePrice),
@@ -312,7 +324,8 @@ type UpgradeResult struct {
 // UpgradeFarm 升级线：A/B/C 扣主积分（写 type=farm 负流水）；
 // D/E 扣农场积分（Coins 内部扣减，不写主积分流水——docs/07 十一）。
 func UpgradeFarm(db *gorm.DB, line string) (*UpgradeResult, error) {
-	if line != "A" && line != "B" && line != "C" && line != "D" && line != "E" {
+	if line != "A" && line != "B" && line != "C" &&
+		line != "A1" && line != "B1" && line != "C1" && line != "D" && line != "E" {
 		return nil, BizErr(400, "参数错误")
 	}
 	var out UpgradeResult
@@ -321,11 +334,14 @@ func UpgradeFarm(db *gorm.DB, line string) (*UpgradeResult, error) {
 		if err != nil {
 			return err
 		}
-		level := map[string]*int{"A": &s.LevelA, "B": &s.LevelB, "C": &s.LevelC, "D": &s.LevelD, "E": &s.LevelE}[line]
+		level := map[string]*int{"A": &s.LevelA, "B": &s.LevelB, "C": &s.LevelC,
+			"A1": &s.LevelA1, "B1": &s.LevelB1, "C1": &s.LevelC1, "D": &s.LevelD, "E": &s.LevelE}[line]
 		if *level >= farmMaxLevel {
 			return BizErr(400, "该线已升到满级")
 		}
-		names := map[string]string{"A": "产量A", "B": "产量B", "C": "周期C", "D": "丰收祝福", "E": "灾祸减免"}
+		names := map[string]string{"A": "产量A", "B": "产量B", "C": "周期C",
+			"A1": "产量A1（拓展）", "B1": "产量B1（拓展）", "C1": "周期C1（拓展）",
+			"D": "丰收祝福", "E": "灾祸减免"}
 		if line == "D" || line == "E" {
 			// D/E：扣农场积分（Coins 内部扣减，不产生主积分流水）
 			priceCoins := float64(FarmEEPrice(*level))
@@ -359,7 +375,10 @@ func UpgradeFarm(db *gorm.DB, line string) (*UpgradeResult, error) {
 		}
 		*level++
 		if err := tx.Model(&model.FarmState{}).Where("id = ?", s.ID).
-			Updates(map[string]any{"level_a": s.LevelA, "level_b": s.LevelB, "level_c": s.LevelC}).Error; err != nil {
+			Updates(map[string]any{
+				"level_a": s.LevelA, "level_b": s.LevelB, "level_c": s.LevelC,
+				"level_a1": s.LevelA1, "level_b1": s.LevelB1, "level_c1": s.LevelC1,
+			}).Error; err != nil {
 			return err
 		}
 		out.Line, out.Level, out.Balance = line, *level, balance-price

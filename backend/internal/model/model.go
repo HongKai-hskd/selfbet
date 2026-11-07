@@ -154,6 +154,9 @@ type FarmState struct {
 	LevelA        int       `json:"level_a"`         // 产量A：收获 +2%/级，无副作用
 	LevelB        int       `json:"level_b"`         // 产量B：收获 +6%/级，周期 +8%/级
 	LevelC        int       `json:"level_c"`         // 周期C：周期 −5%/级
+	LevelA1       int       `json:"level_a1"`        // 拓展 产量A1：同 A 机制（docs/07 2026-11-07）
+	LevelB1       int       `json:"level_b1"`        // 拓展 产量B1：同 B 机制
+	LevelC1       int       `json:"level_c1"`        // 拓展 周期C1：同 C 机制
 	LevelD        int       `json:"level_d"`         // 丰收祝福：每日收益加成 +10%/级，罚分同步放大（docs/07 十一）
 	LevelE        int       `json:"level_e"`         // 灾祸减免：对冲 D 的放大（每级抵 10%，只对冲不独立减罚）
 	LastBonusDate string    `json:"last_bonus_date"` // D 线每日奖励幂等键（YYYY-MM-DD）

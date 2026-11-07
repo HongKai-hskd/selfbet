@@ -68,15 +68,18 @@
 
     <!-- 升级区 -->
     <div class="section-title">农场升级</div>
-    <div class="up-card" v-for="line in upgradeLines" :key="line.key">
-      <div class="up-main">
-        <div class="up-name">{{ line.name }} <span class="up-lv">Lv{{ line.level }}<template v-if="!line.maxed"> → {{ line.level + 1 }}</template></span></div>
-        <div class="up-desc">{{ line.desc }}</div>
+    <template v-for="(line, idx) in upgradeLines" :key="line.key">
+      <div v-if="line.group === '拓展' && (idx === 0 || !upgradeLines[idx - 1].group)" class="up-group">— 拓展升级 —</div>
+      <div class="up-card">
+        <div class="up-main">
+          <div class="up-name">{{ line.name }} <span class="up-lv">Lv{{ line.level }}<template v-if="!line.maxed"> → {{ line.level + 1 }}</template></span></div>
+          <div class="up-desc">{{ line.desc }}</div>
+        </div>
+        <van-button size="small" round type="primary" :color="line.color" :disabled="line.maxed" :loading="busy" @click="doUpgrade(line)">
+          {{ line.maxed ? '已满级' : line.priceLabel }}
+        </van-button>
       </div>
-      <van-button size="small" round type="primary" :color="line.color" :disabled="line.maxed" :loading="busy" @click="doUpgrade(line)">
-        {{ line.maxed ? '已满级' : line.priceLabel }}
-      </van-button>
-    </div>
+    </template>
     <div class="tip">产量A/产量B/周期C 扣主积分；丰收祝福/灾祸减免扣农场积分（对冲关系见道具图鉴）；种植免费，收获产农场积分，攒满 100 可提现 1 积分</div>
   </div>
 </template>
@@ -118,6 +121,18 @@ const upgradeLines = computed(() => {
     {
       key: 'C', name: '周期 C', level: f.level_c, price: f.upgrade_c.price, currency: '积分', priceLabel: `${f.upgrade_c.price} 分`, maxed: f.upgrade_c.maxed,
       desc: `生长周期 -5%，收获来得更快。当前 ${fmtHours(f.period_hours)}`
+    },
+    {
+      key: 'A1', name: '产量 A1', group: '拓展', level: f.level_a1, price: f.upgrade_a1.price, currency: '积分', priceLabel: `${f.upgrade_a1.price} 分`, maxed: f.upgrade_a1.maxed, color: '#00b8d4',
+      desc: `拓展线（同 A 机制）：单田每轮收获 +2%，无副作用`
+    },
+    {
+      key: 'B1', name: '产量 B1', group: '拓展', level: f.level_b1, price: f.upgrade_b1.price, currency: '积分', priceLabel: `${f.upgrade_b1.price} 分`, maxed: f.upgrade_b1.maxed, color: '#00b8d4',
+      desc: `拓展线（同 B 机制）：单田每轮收获 +6%，但生长周期 +8%`
+    },
+    {
+      key: 'C1', name: '周期 C1', group: '拓展', level: f.level_c1, price: f.upgrade_c1.price, currency: '积分', priceLabel: `${f.upgrade_c1.price} 分`, maxed: f.upgrade_c1.maxed, color: '#00b8d4',
+      desc: `拓展线（同 C 机制）：生长周期 -5%`
     },
     {
       key: 'D', name: '丰收祝福', level: f.level_d, price: f.upgrade_d.price, currency: '农场积分', priceLabel: fmtK(f.upgrade_d.price) + ' 分', maxed: f.upgrade_d.maxed, color: '#10b981',
@@ -224,6 +239,12 @@ async function doUpgrade(line) {
     msg = `单格收获 ${fmtNum(f.yield_per_round)} → ${fmtNum(baseY * (1 + 0.06 * (f.level_b + 1)))}，周期 ${fmtHours(f.period_hours)} → ${fmtHours(f.period_hours + 0.64)}`
   }
   if (line.key === 'C') msg = `周期 ${fmtHours(f.period_hours)} → ${fmtHours(Math.max(1, f.period_hours - 0.4))}`
+  if (line.key === 'A1') msg = `单田每轮收获 ${fmtNum(f.yield_per_round)} → ${fmtNum(f.yield_per_round / (1 + 0.02 * f.level_a1) * (1 + 0.02 * (f.level_a1 + 1)))}`
+  if (line.key === 'B1') {
+    const baseY = f.yield_per_round / (1 + 0.06 * f.level_b1)
+    msg = `单田每轮收获 ${fmtNum(f.yield_per_round)} → ${fmtNum(baseY * (1 + 0.06 * (f.level_b1 + 1)))}，周期 ${fmtHours(f.period_hours)} → ${fmtHours(f.period_hours + 0.64)}`
+  }
+  if (line.key === 'C1') msg = `周期 ${fmtHours(f.period_hours)} → ${fmtHours(Math.max(1, f.period_hours - 0.4))}`
   if (line.key === 'D') {
     msg = `昨日净收益加成 +10% → +${10 * (f.level_d + 1)}%（净赚发奖励，净亏同倍放大亏损）`
   }
@@ -322,6 +343,10 @@ onUnmounted(() => clearInterval(timer))
 .pl-sub.gold { color: #ff976a; font-weight: 600; }
 .plot.mature { border-color: #ffd21e; background: #fffbe8; }
 .section-title { margin: 18px 4px 10px; font-size: 14px; font-weight: 600; color: #323233; }
+.up-group {
+  font-size: 12px; color: #00b8d4; font-weight: 600;
+  margin: 14px 0 6px; text-align: center; letter-spacing: 2px;
+}
 .up-card {
   background: #fff;
   border-radius: 12px;

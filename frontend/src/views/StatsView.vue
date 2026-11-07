@@ -36,6 +36,7 @@
         <div class="mini-chips">
           <span class="mchip" :class="{ on: heatWeeks === 26 }" @click="setHeatWeeks(26)">半年</span>
           <span class="mchip" :class="{ on: heatWeeks === 53 }" @click="setHeatWeeks(53)">一年</span>
+          <span class="mchip analyze-chip" @click="openAnalyze">📊 分析</span>
         </div>
       </div>
       <div class="hm-scroll" ref="hmScrollEl">
@@ -136,6 +137,51 @@
         v-model="endPicker" :min-date="minDate" :max-date="maxDate"
         title="结束日期" @confirm="onPickEnd" @cancel="pickEnd = false"
       />
+    </van-popup>
+
+    <!-- 当日流水弹窗 -->
+    <van-popup v-model:show="dayShow" round position="bottom" style="height: 68%; display: flex; flex-direction: column; padding: 16px">
+      <div class="day-head">
+        <span class="form-title">{{ dayTitle }}</span>
+        <span class="sum-chips">
+          <span class="sum-chip pos">收 +{{ dayPos }}</span>
+          <span class="sum-chip neg">支 {{ dayNeg }}</span>
+          <span class="sum-chip net" :class="{ neg: daySum < 0 }">净 {{ signedNum(daySum) }} 分</span>
+        </span>
+      </div>
+      <div class="detail-list" style="overflow-y: auto; flex: 1; max-height: none">
+        <div v-for="item in dayItems" :key="item.id" class="detail-item">
+          <div class="ledger-main">
+            <div class="detail-note">{{ item.note }}</div>
+            <div class="ledger-time">{{ fmtTime(item.created_at) }}</div>
+          </div>
+          <div class="ledger-amount" :class="item.amount > 0 ? 'plus' : 'minus'">
+            {{ item.amount > 0 ? '+' : '' }}{{ item.amount }}
+          </div>
+        </div>
+        <van-empty v-if="!dayItems.length" description="这一天没有积分流水" image-size="64" />
+      </div>
+    </van-popup>
+
+    <!-- 聚类分析弹窗 -->
+    <van-popup v-model:show="analyzeShow" round position="bottom" style="height: 70%; display: flex; flex-direction: column; padding: 16px">
+      <div class="day-head">
+        <span class="form-title">流水分析</span>
+        <span class="sum-chips">
+          <span class="sum-chip pos">收 +{{ detailPos }}</span>
+          <span class="sum-chip neg">支 {{ detailNeg }}</span>
+          <span class="sum-chip net" :class="{ neg: detailSum < 0 }">净 {{ signedNum(detailSum) }} 分</span>
+        </span>
+      </div>
+      <div class="tip" style="margin: 6px 0 10px">{{ rangeText }} · 按合计金额排名</div>
+      <div style="overflow-y: auto; flex: 1">
+        <div v-for="g in analyzeGroups" :key="g.type" class="ana-row">
+          <div class="ana-name">{{ g.name }}</div>
+          <div class="ana-count">×{{ g.count }}</div>
+          <div class="ana-sum" :class="g.sum > 0 ? 'plus' : (g.sum < 0 ? 'minus' : '')">{{ g.sum > 0 ? '+' : '' }}{{ g.sum }}</div>
+        </div>
+        <van-empty v-if="!analyzeGroups.length" description="这个范围没有记录" image-size="64" />
+      </div>
     </van-popup>
 
     <!-- 悬停气泡 -->
@@ -305,11 +351,48 @@ function hideTip() {
   tip.value.show = false
 }
 
-function tapCell(cell) {
+// 点击热力图格子 → 当日积分流水弹窗（2026-11-07 需求）
+const dayShow = ref(false)
+const dayTitle = ref('')
+const dayItems = ref([])
+const daySum = ref(0)
+const dayPos = ref(0)
+const dayNeg = ref(0)
+
+async function tapCell(cell) {
   const d = new Date(cell.date)
-  const v = cell.earned
-  if (v !== 0) showToast(`${d.getMonth() + 1}月${d.getDate()}日 净 ${v > 0 ? '+' : ''}${v} 分`)
-  else showToast(`${d.getMonth() + 1}月${d.getDate()}日 没有积分变动`)
+  dayTitle.value = `${d.getMonth() + 1}月${d.getDate()}日`
+  dayShow.value = true
+  try {
+    const res = await api.get('/ledger', { params: { start_date: cell.date, end_date: cell.date, limit: 500 } })
+    dayItems.value = res.items || []
+    daySum.value = res.range_sum || 0
+    dayPos.value = res.range_pos || 0
+    dayNeg.value = res.range_neg || 0
+  } catch (e) {
+    showToast(e)
+  }
+}
+
+// ---- 聚类分析（需求 2）----
+const analyzeShow = ref(false)
+const TYPE_NAMES = {
+  task: '任务完成', box: '宝箱', penalty: '罚分', shop: '商城兑换', cash: '现金',
+  farm: '农场', item: '道具使用', farm_bonus: '丰收祝福', farm_penalty: '净亏放大',
+  perfect_day: '全勤奖', cooldown_reward: '无冷却奖励', overdraft_interest: '透支利息'
+}
+const analyzeGroups = computed(() => {
+  const map = {}
+  for (const it of detailItems.value) {
+    if (!map[it.type]) map[it.type] = { type: it.type, name: TYPE_NAMES[it.type] || it.type, count: 0, sum: 0 }
+    map[it.type].count++
+    map[it.type].sum += it.amount
+  }
+  // 按合计金额绝对值排名（大的在前）
+  return Object.values(map).sort((a, b) => Math.abs(b.sum) - Math.abs(a.sum))
+})
+function openAnalyze() {
+  analyzeShow.value = true
 }
 
 // ---- 明细（按范围） ----
@@ -537,6 +620,14 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 .sum-chips { display: inline-flex; align-items: center; gap: 6px; }
+.day-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.ana-row { display: flex; align-items: center; padding: 12px 4px; border-bottom: 1px solid #f2f3f5; }
+.ana-name { flex: 1; font-size: 14px; color: #323233; }
+.ana-count { font-size: 12px; color: #969799; margin-right: 12px; }
+.ana-sum { font-size: 15px; font-weight: 600; }
+.ana-sum.plus { color: #07c160; }
+.ana-sum.minus { color: #ee0a24; }
+.analyze-chip { color: #1989fa !important; }
 .sum-chip {
   display: inline-block; padding: 2px 9px; border-radius: 10px;
   font-size: 12px; font-weight: 600; line-height: 1.5;
